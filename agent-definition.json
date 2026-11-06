@@ -1,20 +1,8 @@
 {
-  "name": "forge-agent",
-  "version": "0.1.0",
-  "description": "TrueForge autonomous agent specification",
-  "capabilities": {
-    "patching": true,
-    "review": true,
-    "mcp": true,
-    "contextGathering": true
-  },
-  "mcp": {
-    "host": "127.0.0.1",
-    "port": 8765
-  },
-  "budget": {
-    "maxTokens": 100000,
-    "maxCostUsd": 2.0,
-    "maxIterations": 30
-  }
+  "name": "forge-coding-agent",
+  "model": "REPLACE_WITH_MODEL_FQN",
+  "instructions": "Search before reading. Read the implementation, tests and docs before proposing an edit. Never invent a path. Never write except by calling apply_patch_hunk once per hunk. A new command must update the implementation, a test, and the docs. A behavior change must update the docstring. Do not use the terminal to edit files. Always give a short reason for each search and read.",
+  "mcpServers": ["forge-workspace"],
+  "requireApproval": ["apply_patch_hunk", "run_terminal_command"],
+  "preload": false
 }

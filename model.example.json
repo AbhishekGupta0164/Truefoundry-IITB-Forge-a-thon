@@ -1,11 +1,5 @@
 {
-  "provider": "trueforge",
-  "endpoint": "http://127.0.0.1:8000/v1",
-  "model": "deepseek-coder",
-  "temperature": 0.2,
-  "maxTokens": 4096,
-  "budget": {
-    "tokenLimit": 100000,
-    "costLimitUsd": 2.0
-  }
+  "baseUrl": "http://localhost:11434/v1",
+  "model": "your-model-name",
+  "apiKey": ""
 }

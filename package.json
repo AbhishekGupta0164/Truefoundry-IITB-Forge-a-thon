@@ -1,43 +1,85 @@
 {
-  "name": "truefoundry-forgeathon",
-  "displayName": "TrueFoundry Forge-a-thon",
-  "description": "TrueFoundry Forge-a-thon VS Code Extension",
-  "version": "0.0.1",
+  "name": "forge-agent",
+  "displayName": "Forge Agent",
+  "version": "0.1.0",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.90.0",
+    "node": ">=22.14"
   },
-  "categories": [
-    "Other"
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
   ],
-  "activationEvents": [],
-  "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "truefoundry-forgeathon.helloWorld",
-        "title": "TrueFoundry: Hello World"
+        "command": "forge.inlineEdit",
+        "title": "Forge: Inline Edit"
+      },
+      {
+        "command": "forge.openPanel",
+        "title": "Forge: Open Agent Panel"
+      },
+      {
+        "command": "forge.cancel",
+        "title": "Forge: Cancel Run"
+      },
+      {
+        "command": "forge.undoTask",
+        "title": "Forge: Undo Whole Task"
+      },
+      {
+        "command": "forge.copyMcpConfig",
+        "title": "Forge: Copy MCP Connector Settings"
       }
-    ]
+    ],
+    "keybindings": [
+      {
+        "command": "forge.inlineEdit",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "properties": {
+        "forge.mcpPort": {
+          "type": "number",
+          "default": 8765
+        },
+        "forge.trueforgeUrl": {
+          "type": "string",
+          "default": "http://localhost:8790"
+        }
+      }
+    }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "build": "npm run compile",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext ts",
-    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src test --ext .ts",
     "test:unit": "vitest run",
-    "test": "npm run test:unit"
+    "test:e2e": "vscode-test",
+    "eval": "tsx eval/run.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.5.0",
+    "diff": "^5.2.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/mocha": "^10.0.6",
+    "@types/diff": "^5.0.9",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
+    "@vscode/test-cli": "^0.0.9",
+    "@vscode/test-electron": "^2.4.0",
+    "esbuild": "^0.21.5",
     "eslint": "^8.57.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.4.5",
-    "vitest": "^1.6.1"
+    "vitest": "^1.6.0"
   }
 }
