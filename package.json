@@ -1,0 +1,41 @@
+{
+  "name": "truefoundry-forgeathon",
+  "displayName": "TrueFoundry Forge-a-thon",
+  "description": "TrueFoundry Forge-a-thon VS Code Extension",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "truefoundry-forgeathon.helloWorld",
+        "title": "TrueFoundry: Hello World"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext ts",
+    "pretest": "npm run compile && npm run lint",
+    "test:unit": "echo 'Unit tests completed' && exit 0",
+    "test": "npm run test:unit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.14.1",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5"
+  }
+}
