@@ -1,0 +1,20 @@
+{
+  "name": "forge-agent",
+  "version": "0.1.0",
+  "description": "TrueForge autonomous agent specification",
+  "capabilities": {
+    "patching": true,
+    "review": true,
+    "mcp": true,
+    "contextGathering": true
+  },
+  "mcp": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "budget": {
+    "maxTokens": 100000,
+    "maxCostUsd": 2.0,
+    "maxIterations": 30
+  }
+}

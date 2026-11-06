@@ -1,0 +1,16 @@
+---
+description: TrueForge Extension Development Rules & Safety Invariants
+globs: **/*.ts, **/*.json, **/*.md
+---
+
+# TrueForge Development Rules
+
+When developing or modifying this codebase, strictly follow these invariants:
+
+1. **Model Access**: Never add direct model provider API clients into the extension. All model communications go through TrueForge.
+2. **File Modifications**: File updates must use the patch hunk application mechanism (`apply_patch_hunk`).
+3. **Workspace Boundary**: Never read or write outside the current workspace directory.
+4. **Command Execution**: Only execute commands verified against the command allowlist in `src/shared/constants.ts`.
+5. **MCP Binding**: MCP servers must bind exclusively to `127.0.0.1:8765`.
+6. **No Secrets**: Never commit secrets, credentials, or API tokens.
+7. **Testing**: Every new module or functionality requires unit test coverage under `test/unit/`.

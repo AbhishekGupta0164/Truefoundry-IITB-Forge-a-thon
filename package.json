@@ -23,19 +23,21 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "build": "npm run compile",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext ts",
     "pretest": "npm run compile && npm run lint",
-    "test:unit": "echo 'Unit tests completed' && exit 0",
+    "test:unit": "vitest run",
     "test": "npm run test:unit"
   },
   "devDependencies": {
-    "@types/vscode": "^1.90.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
     "eslint": "^8.57.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.1"
   }
 }
