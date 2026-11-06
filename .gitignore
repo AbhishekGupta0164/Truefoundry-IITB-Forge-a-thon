@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+coverage/
+
+.env
+.env.*
+!.env.example
+
+*.key
+*.pem
+*.vsix
+
+.DS_Store
