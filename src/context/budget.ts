@@ -46,6 +46,12 @@ export class ContextBudgetTracker {
         `Retrieved context token budget exceeded: ${this.retrievedTokens} > ${this.limits.MAX_TOKENS} tokens`
       );
     }
+
+    if (this.retrievedTokens > this.safetyCap.MAX_TOKENS) {
+      throw new BudgetReachedError(
+        `Total safety token cap exceeded: ${this.retrievedTokens} > ${this.safetyCap.MAX_TOKENS} tokens`
+      );
+    }
   }
 
   public recordSearch(hitCount: number): void {
