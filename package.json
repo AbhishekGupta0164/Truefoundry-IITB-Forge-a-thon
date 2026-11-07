@@ -58,7 +58,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src test --ext .ts",
+    "lint": "eslint src test",
     "test:unit": "vitest run",
     "test:e2e": "vscode-test",
     "eval": "tsx eval/run.ts"
