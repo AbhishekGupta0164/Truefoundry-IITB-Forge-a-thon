@@ -1,95 +1,171 @@
-/**
- * search_text MCP tool
- * Grep-like text search across workspace files.
- */
-
 import * as fs from 'fs';
 import * as path from 'path';
-import { z } from 'zod';
-import { ContextBudgetTracker } from '../../context/budget';
 import { WorkspaceManager } from '../workspace';
+import { ContextBudgetTracker } from '../../context/budget';
+import { isPathSafe } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
+import { RETRIEVED_CONTEXT_BUDGET } from '../../shared/constants';
 
-export const SearchTextInput = z.object({
-  pattern: z.string().describe('Text or regex pattern to search for'),
-  fileGlob: z.string().optional().describe('File glob pattern, e.g. "**/*.py" (default: all text files)'),
-  maxResults: z.number().int().min(1).max(50).optional().default(20).describe('Maximum number of matching lines to return')
-});
+export interface SearchTextParams {
+  query: string;
+  glob?: string;
+  reason?: string;
+}
 
-export type SearchTextInput = z.infer<typeof SearchTextInput>;
+export interface SearchHit {
+  file: string;
+  line: number;
+  snippet: string;
+}
 
+export interface SearchTextResult {
+  hits: SearchHit[];
+  totalHits: number;
+  truncated: boolean;
+  rawText: string;
+}
+
+const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'dist', 'out', '.pytest_cache', '__pycache__']);
 const TEXT_EXTENSIONS = new Set([
-  '.ts', '.js', '.py', '.json', '.md', '.txt', '.yaml', '.yml',
-  '.toml', '.cfg', '.ini', '.sh', '.bash', '.html', '.css'
+  '.ts', '.js', '.mjs', '.cjs', '.json', '.py', '.md', '.txt', '.yml', '.yaml',
+  '.html', '.css', '.toml', '.rst', '.sh', '.xml', '.svg'
 ]);
 
-function walk(dir: string, maxFiles = 500): string[] {
+function shouldScanFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return TEXT_EXTENSIONS.has(ext);
+}
+
+function walkWorkspaceFiles(
+  dir: string,
+  root: string,
+  globFilter?: string
+): string[] {
   const results: string[] = [];
-  const stack = [dir];
-  while (stack.length && results.length < maxFiles) {
-    const current = stack.pop()!;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    const entryName = entry.name;
+    if (IGNORED_DIRS.has(entryName)) {
       continue;
     }
-    for (const entry of entries) {
-      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-      } else if (TEXT_EXTENSIONS.has(path.extname(entry.name))) {
-        results.push(full);
+
+    const fullPath = path.join(dir, entryName);
+    const relPath = path.relative(root, fullPath).replace(/\\/g, '/');
+
+    if (!isPathSafe(relPath, root)) {
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      results.push(...walkWorkspaceFiles(fullPath, root, globFilter));
+    } else if (entry.isFile()) {
+      if (globFilter) {
+        // Simple glob match: supports *.ext or prefix* or exact match
+        const matchesGlob = matchSimpleGlob(entryName, relPath, globFilter);
+        if (!matchesGlob) {
+          continue;
+        }
+      }
+      if (shouldScanFile(fullPath)) {
+        results.push(relPath);
       }
     }
   }
+
   return results;
 }
 
-export function makeSearchTextTool(workspace: WorkspaceManager, budget: ContextBudgetTracker) {
-  return {
-    name: 'search_text',
-    description: 'Search for a text pattern across workspace files. Returns matching lines with file:line context.',
-    inputSchema: SearchTextInput,
-    async execute(input: SearchTextInput): Promise<string> {
-      const root = workspace.getRoot();
-      const files = walk(root);
-      let regex: RegExp;
-      try {
-        regex = new RegExp(input.pattern, 'i');
-      } catch {
-        return sanitizeToolOutput(`Error: Invalid regex pattern: ${input.pattern}`);
-      }
+function matchSimpleGlob(fileName: string, relPath: string, glob: string): boolean {
+  if (glob === '*' || glob === '**/*') {
+    return true;
+  }
+  const cleanGlob = glob.replace(/\\/g, '/');
+  if (cleanGlob.startsWith('*.')) {
+    const ext = cleanGlob.slice(1);
+    return fileName.endsWith(ext) || relPath.endsWith(ext);
+  }
+  const regexStr = '^' + cleanGlob.replace(/\./g, '\\.').replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*') + '$';
+  try {
+    const regex = new RegExp(regexStr, 'i');
+    return regex.test(relPath) || regex.test(fileName);
+  } catch {
+    return relPath.includes(cleanGlob);
+  }
+}
 
-      const matches: string[] = [];
-      let hitCount = 0;
+export async function executeSearchText(
+  params: SearchTextParams,
+  workspaceManager: WorkspaceManager,
+  budgetTracker: ContextBudgetTracker
+): Promise<SearchTextResult> {
+  const { query, glob: globFilter } = params;
 
-      for (const file of files) {
-        if (matches.length >= (input.maxResults ?? 20)) break;
-        let content: string;
-        try {
-          content = fs.readFileSync(file, 'utf-8');
-        } catch {
-          continue;
-        }
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-          if (regex.test(lines[i])) {
-            const relPath = path.relative(root, file);
-            matches.push(`${relPath}:${i + 1}: ${lines[i].trim()}`);
-            hitCount++;
-            if (matches.length >= (input.maxResults ?? 20)) break;
-          }
-        }
-      }
+  if (!query || typeof query !== 'string') {
+    throw new Error('Search query must be a non-empty string');
+  }
 
-      budget.recordSearch(hitCount);
+  const root = workspaceManager.getRoot();
+  const candidateFiles = walkWorkspaceFiles(root, root, globFilter);
+  const maxHits = RETRIEVED_CONTEXT_BUDGET.MAX_SEARCH_HITS;
+  const hits: SearchHit[] = [];
 
-      if (matches.length === 0) {
-        return sanitizeToolOutput(`No matches found for pattern: ${input.pattern}`);
-      }
-      return sanitizeToolOutput(matches.join('\n'));
+  const lowerQuery = query.toLowerCase();
+
+  for (const relFile of candidateFiles) {
+    if (hits.length >= maxHits) {
+      break;
     }
+
+    let absPath: string;
+    try {
+      absPath = workspaceManager.resolveSafePath(relFile);
+    } catch {
+      continue;
+    }
+
+    let fileContent: string;
+    try {
+      fileContent = fs.readFileSync(absPath, 'utf-8');
+    } catch {
+      continue;
+    }
+
+    const lines = fileContent.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (hits.length >= maxHits) {
+        break;
+      }
+      const line = lines[i];
+      if (line.toLowerCase().includes(lowerQuery)) {
+        hits.push({
+          file: relFile,
+          line: i + 1,
+          snippet: line.trim()
+        });
+      }
+    }
+  }
+
+  budgetTracker.recordSearch(hits.length);
+
+  const formattedHits = hits
+    .map(h => `${h.file}:${h.line}: ${h.snippet}`)
+    .join('\n');
+
+  const summary = hits.length > 0
+    ? `Found ${hits.length} matches for "${query}":\n${formattedHits}`
+    : `No matches found for "${query}".`;
+
+  return {
+    hits,
+    totalHits: hits.length,
+    truncated: hits.length >= maxHits,
+    rawText: sanitizeToolOutput(summary)
   };
 }

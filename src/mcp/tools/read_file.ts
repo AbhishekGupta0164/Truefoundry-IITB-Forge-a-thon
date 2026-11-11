@@ -1,47 +1,90 @@
-/**
- * read_file MCP tool
- * Reads up to MAX_LINES_PER_READ lines from a workspace file.
- */
-
 import * as fs from 'fs';
-import { z } from 'zod';
-import { RETRIEVED_CONTEXT_BUDGET } from '../../shared/constants';
-import { ContextBudgetTracker } from '../../context/budget';
 import { WorkspaceManager } from '../workspace';
+import { ContextBudgetTracker } from '../../context/budget';
 import { sanitizeToolOutput } from '../sanitize';
+import { RETRIEVED_CONTEXT_BUDGET } from '../../shared/constants';
 
-export const ReadFileInput = z.object({
-  path: z.string().describe('Relative path to the file from the workspace root'),
-  startLine: z.number().int().min(1).optional().describe('1-based start line (default: 1)'),
-  endLine: z.number().int().min(1).optional().describe('1-based end line (inclusive)')
-});
+export interface ReadFileParams {
+  path: string;
+  start?: number;
+  end?: number;
+  reason?: string;
+}
 
-export type ReadFileInput = z.infer<typeof ReadFileInput>;
+export interface ReadFileResult {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  lines: string[];
+  rawText: string;
+}
 
-export function makeReadFileTool(workspace: WorkspaceManager, budget: ContextBudgetTracker) {
+export async function executeReadFile(
+  params: ReadFileParams,
+  workspaceManager: WorkspaceManager,
+  budgetTracker: ContextBudgetTracker
+): Promise<ReadFileResult> {
+  const { path: relativePath, start = 1, end, reason: _reason } = params;
+
+  if (!relativePath || typeof relativePath !== 'string') {
+    throw new Error('File path must be a non-empty string');
+  }
+
+  // Resolve safe path or throw security violation
+  const absPath = workspaceManager.resolveSafePath(relativePath);
+
+  if (!fs.existsSync(absPath)) {
+    throw new Error(`File not found: ${relativePath}`);
+  }
+
+  const fileContent = fs.readFileSync(absPath, 'utf-8');
+  const allLines = fileContent.split(/\r?\n/);
+  const totalLines = allLines.length;
+
+  const startLine = Math.max(1, Math.floor(start));
+  if (end !== undefined && (Math.floor(end) - startLine + 1) > RETRIEVED_CONTEXT_BUDGET.MAX_LINES_PER_READ) {
+    throw new Error(
+      `Read request exceeds maximum limit of ${RETRIEVED_CONTEXT_BUDGET.MAX_LINES_PER_READ} lines (requested: ${Math.floor(end) - startLine + 1})`
+    );
+  }
+
+  const endLine = end !== undefined
+    ? Math.min(totalLines, Math.floor(end))
+    : Math.min(totalLines, startLine + RETRIEVED_CONTEXT_BUDGET.MAX_LINES_PER_READ - 1);
+
+  if (startLine > totalLines && totalLines > 0) {
+    throw new Error(`Start line ${startLine} is beyond end of file (${totalLines} lines)`);
+  }
+
+  const requestedLineCount = Math.max(0, endLine - startLine + 1);
+  if (requestedLineCount > RETRIEVED_CONTEXT_BUDGET.MAX_LINES_PER_READ) {
+    throw new Error(
+      `Read request exceeds maximum limit of ${RETRIEVED_CONTEXT_BUDGET.MAX_LINES_PER_READ} lines (requested: ${requestedLineCount})`
+    );
+  }
+
+  const selectedLines = allLines.slice(startLine - 1, endLine);
+  const chunkText = selectedLines.join('\n');
+  const tokenCount = Math.ceil(chunkText.length / 4);
+
+  // Apply context budget accounting (file count, token budget, line limit)
+  budgetTracker.recordFileRead(relativePath, requestedLineCount, tokenCount);
+
+  const formattedLines = selectedLines.map((line, idx) => {
+    const lineNum = startLine + idx;
+    return `${lineNum.toString().padStart(4, ' ')} | ${line}`;
+  });
+
+  const header = `File: ${relativePath} (lines ${startLine}-${endLine} of ${totalLines})`;
+  const body = `${header}\n${formattedLines.join('\n')}`;
+
   return {
-    name: 'read_file',
-    description: 'Read a file from the workspace. Limited to 200 lines per call. Respects context budget.',
-    inputSchema: ReadFileInput,
-    async execute(input: ReadFileInput): Promise<string> {
-      const absPath = workspace.resolveSafePath(input.path);
-
-      if (!fs.existsSync(absPath)) {
-        return sanitizeToolOutput(`Error: File not found: ${input.path}`);
-      }
-
-      const rawContent = fs.readFileSync(absPath, 'utf-8');
-      const allLines = rawContent.split('\n');
-
-      const start = Math.max(1, input.startLine ?? 1);
-      const maxEnd = start + RETRIEVED_CONTEXT_BUDGET.MAX_LINES_PER_READ - 1;
-      const end = Math.min(input.endLine ?? maxEnd, maxEnd, allLines.length);
-
-      const sliced = allLines.slice(start - 1, end);
-      budget.recordFileRead(input.path, sliced.length);
-
-      const header = `// ${input.path} [lines ${start}-${end} of ${allLines.length}]\n`;
-      return sanitizeToolOutput(header + sliced.join('\n'));
-    }
+    filePath: relativePath,
+    startLine,
+    endLine,
+    totalLines,
+    lines: selectedLines,
+    rawText: sanitizeToolOutput(body)
   };
 }

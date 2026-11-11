@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 
 const SECRET_KEY = 'forge.mcpBearerToken';
 
