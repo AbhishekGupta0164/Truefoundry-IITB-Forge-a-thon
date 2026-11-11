@@ -8,9 +8,13 @@
 
 import * as http from 'http';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Readable } from 'stream';
+import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
 const PORT = 8765;
 const HOST = '127.0.0.1';
@@ -30,22 +34,37 @@ export async function createSpikeServer(token = FORGE_TOKEN, port = PORT) {
     };
   });
 
+  // Stage 3 S3 requirement: stub apply_patch_hunk(patch_id, hunk_id)
+  mcpServer.tool(
+    'apply_patch_hunk',
+    'Stub tool for S3 approval spike. Appends a line to mini-repo scratch file.',
+    {
+      patch_id: z.string().describe('Unique identifier of the patch'),
+      hunk_id: z.string().describe('Unique identifier of the hunk (e.g. h1 or h2)')
+    },
+    { destructiveHint: true },
+    async (args) => {
+      const targetDir = path.resolve(process.cwd(), 'test/fixtures/mini-repo');
+      fs.mkdirSync(targetDir, { recursive: true });
+      const targetFile = path.join(targetDir, 'scratch_patch.txt');
+      fs.appendFileSync(targetFile, `Applied hunk ${args.hunk_id} from patch ${args.patch_id}\n`, 'utf-8');
+      return {
+        content: [{ type: 'text', text: `Hunk ${args.hunk_id} applied successfully to scratch_patch.txt` }]
+      };
+    }
+  );
+
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
     enableJsonResponse: true
   });
 
   await mcpServer.connect(transport);
+  const sseTransports = new Map<string, SSEServerTransport>();
 
   const server = http.createServer(async (req, res) => {
     try {
       const parsedUrl = new URL(req.url || '/', `http://${HOST}:${port}`);
-
-      if (parsedUrl.pathname !== ENDPOINT) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: `Not Found: ${parsedUrl.pathname}` }));
-        return;
-      }
 
       // Bearer token authentication
       const authHeader = req.headers['authorization'];
@@ -63,6 +82,59 @@ export async function createSpikeServer(token = FORGE_TOKEN, port = PORT) {
           'WWW-Authenticate': 'Bearer error="invalid_token"'
         });
         res.end(JSON.stringify({ error: 'Unauthorized: missing or invalid bearer token' }));
+        return;
+      }
+
+      if (parsedUrl.pathname === '/sse') {
+        const sseTransport = new SSEServerTransport('/messages', res);
+        const sid = sseTransport.sessionId;
+        sseTransports.set(sid, sseTransport);
+        sseTransport.onclose = () => {
+          sseTransports.delete(sid);
+        };
+        const sessionMcp = new McpServer(
+          { name: 'forge-workspace', version: '0.1.0' },
+          { capabilities: { tools: { listChanged: true } } }
+        );
+        sessionMcp.tool('ping', 'Health check ping tool', {}, async () => ({
+          content: [{ type: 'text', text: 'pong' }]
+        }));
+        sessionMcp.tool(
+          'apply_patch_hunk',
+          'Stub tool for S3 approval spike. Appends a line to mini-repo scratch file.',
+          {
+            patch_id: z.string().describe('Unique identifier of the patch'),
+            hunk_id: z.string().describe('Unique identifier of the hunk')
+          },
+          async (args) => {
+            const targetDir = path.resolve(process.cwd(), 'test/fixtures/mini-repo');
+            fs.mkdirSync(targetDir, { recursive: true });
+            const targetFile = path.join(targetDir, 'scratch_patch.txt');
+            fs.appendFileSync(targetFile, `Applied hunk ${args.hunk_id} from patch ${args.patch_id}\n`, 'utf-8');
+            return {
+              content: [{ type: 'text', text: `Hunk ${args.hunk_id} applied successfully to scratch_patch.txt` }]
+            };
+          }
+        );
+        await sessionMcp.connect(sseTransport);
+        return;
+      }
+
+      if (parsedUrl.pathname === '/messages') {
+        const sid = parsedUrl.searchParams.get('sessionId');
+        const sse = sid ? sseTransports.get(sid) : undefined;
+        if (!sse) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Session not found' }));
+          return;
+        }
+        await sse.handlePostMessage(req, res);
+        return;
+      }
+
+      if (parsedUrl.pathname !== ENDPOINT) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Not Found: ${parsedUrl.pathname}` }));
         return;
       }
 

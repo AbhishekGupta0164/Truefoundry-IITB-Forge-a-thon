@@ -12,13 +12,27 @@ export interface ValidationResult {
  */
 export function validatePythonSource(source: string, workspaceRoot?: string): ValidationResult {
   const scriptPath = path.resolve(workspaceRoot || process.cwd(), 'scripts', 'check_py.py');
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+
   try {
     if (fs.existsSync(scriptPath)) {
-      const output = execFileSync('python3', [scriptPath], {
-        input: source,
-        encoding: 'utf-8',
-        timeout: 5000
-      });
+      let output: string;
+      try {
+        output = execFileSync(pythonCmd, [scriptPath], {
+          input: source,
+          encoding: 'utf-8',
+          timeout: 5000
+        });
+      } catch (err: any) {
+        // If primary python command failed with ENOENT, try fallback command
+        const fallbackCmd = pythonCmd === 'python' ? 'python3' : 'python';
+        output = execFileSync(fallbackCmd, [scriptPath], {
+          input: source,
+          encoding: 'utf-8',
+          timeout: 5000
+        });
+      }
+
       const parsed = JSON.parse(output);
       const errors = Array.isArray(parsed.errors)
         ? parsed.errors.map((e: any) => typeof e === 'string' ? e : e.message || JSON.stringify(e))
@@ -28,12 +42,22 @@ export function validatePythonSource(source: string, workspaceRoot?: string): Va
         errors
       };
     }
-    // Fallback: run python3 -c with ast.parse
-    execFileSync('python3', ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], {
-      input: source,
-      encoding: 'utf-8',
-      timeout: 5000
-    });
+
+    // Fallback: run python -c with ast.parse
+    try {
+      execFileSync(pythonCmd, ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], {
+        input: source,
+        encoding: 'utf-8',
+        timeout: 5000
+      });
+    } catch {
+      const fallbackCmd = pythonCmd === 'python' ? 'python3' : 'python';
+      execFileSync(fallbackCmd, ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], {
+        input: source,
+        encoding: 'utf-8',
+        timeout: 5000
+      });
+    }
     return { valid: true, errors: [] };
   } catch (err: any) {
     const errorMsg = err.stderr ? String(err.stderr).trim() : err.message;

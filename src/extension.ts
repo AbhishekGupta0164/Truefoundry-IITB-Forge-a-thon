@@ -8,6 +8,7 @@ import { defaultUndoManager } from './review/undo';
 import { defaultCodeLensProvider } from './review/codelens';
 import { defaultStatusBar } from './ui/status-bar';
 import { defaultDiffViewManager } from './review/diff-view';
+import { defaultReviewManager } from './review/manager';
 
 let mcpServerManager: MCPServerManager | null = null;
 
@@ -33,18 +34,30 @@ export async function activate(context: vscode.ExtensionContext) {
     await defaultInlineEditController.trigger();
   });
 
-  // Hunk review commands (CodeLens actions)
+  // Hunk review commands (CodeLens and UI actions)
   const acceptHunkCmd = vscode.commands.registerCommand(
     'forge.acceptHunk',
     async (patchId: string, hunkId: string) => {
-      await defaultInlineEditController.acceptHunk(patchId, hunkId);
+      try {
+        await defaultReviewManager.acceptHunk(patchId, hunkId);
+        defaultCodeLensProvider.refresh();
+        vscode.window.showInformationMessage(`Forge: Accepted hunk ${hunkId}`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Forge: Failed to accept hunk: ${err.message}`);
+      }
     }
   );
 
   const rejectHunkCmd = vscode.commands.registerCommand(
     'forge.rejectHunk',
     async (patchId: string, hunkId: string) => {
-      await defaultInlineEditController.rejectHunk(patchId, hunkId);
+      try {
+        defaultReviewManager.rejectHunk(patchId, hunkId);
+        defaultCodeLensProvider.refresh();
+        vscode.window.showInformationMessage(`Forge: Rejected hunk ${hunkId}`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Forge: Failed to reject hunk: ${err.message}`);
+      }
     }
   );
 
@@ -60,20 +73,20 @@ export async function activate(context: vscode.ExtensionContext) {
       defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
     }
     defaultCodeLensProvider.refresh();
-    defaultStatusBar.setReady();
+    defaultReviewManager.updateStatusBar();
     vscode.window.showInformationMessage(
       `Forge: Run cancelled (${stats.cancelledPatches} patches discarded)`
     );
   });
 
-  // Undo whole task
+  // Undo whole task via inverse edits
   const undoTaskCmd = vscode.commands.registerCommand('forge.undoTask', async () => {
     const res = await defaultUndoManager.undoTask();
     if (vscode.window.activeTextEditor) {
       defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
     }
     defaultCodeLensProvider.refresh();
-    defaultStatusBar.setReady();
+    defaultReviewManager.updateStatusBar();
     vscode.window.showInformationMessage(
       `Forge: Whole task undone (${res.revertedFiles.length} file(s) reverted)`
     );
@@ -109,6 +122,17 @@ export async function activate(context: vscode.ExtensionContext) {
     defaultCodeLensProvider
   );
 
+  // Register virtual document content providers for native vscode.diff
+  const contentProvider = defaultDiffViewManager.getContentProvider();
+  const originalDocProvider = vscode.workspace.registerTextDocumentContentProvider(
+    'forge-original',
+    contentProvider
+  );
+  const proposedDocProvider = vscode.workspace.registerTextDocumentContentProvider(
+    'forge-proposed',
+    contentProvider
+  );
+
   context.subscriptions.push(
     inlineEditCmd,
     acceptHunkCmd,
@@ -118,6 +142,8 @@ export async function activate(context: vscode.ExtensionContext) {
     undoTaskCmd,
     copyMcpConfigCmd,
     codeLensDisposable,
+    originalDocProvider,
+    proposedDocProvider,
     {
       dispose: () => {
         defaultStatusBar.dispose();
