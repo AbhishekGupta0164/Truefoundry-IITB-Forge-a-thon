@@ -1,35 +1,31 @@
-import * as vscode from 'vscode';
+/**
+ * SessionStateManager — tracks the active TrueForge session for reconnect.
+ */
 
-export interface PersistedSession {
+export interface ActiveSession {
   sessionId: string;
-  turnId?: string;
   lastSequence: number;
-  updatedAt: number;
+  startedAt: number;
 }
 
-const SESSION_KEY = 'forge.activeSession';
-
 export class SessionStateManager {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  private session: ActiveSession | null = null;
 
-  public getSession(): PersistedSession | undefined {
-    return this.context.workspaceState.get<PersistedSession>(SESSION_KEY);
+  public setSession(sessionId: string): void {
+    this.session = { sessionId, lastSequence: 0, startedAt: Date.now() };
   }
 
-  public async setSession(session: PersistedSession): Promise<void> {
-    await this.context.workspaceState.update(SESSION_KEY, session);
+  public getSession(): ActiveSession | null {
+    return this.session;
   }
 
-  public async updateSequence(sequence: number): Promise<void> {
-    const session = this.getSession();
-    if (session) {
-      session.lastSequence = sequence;
-      session.updatedAt = Date.now();
-      await this.setSession(session);
+  public advanceSequence(): void {
+    if (this.session) {
+      this.session.lastSequence += 1;
     }
   }
 
-  public async clearSession(): Promise<void> {
-    await this.context.workspaceState.update(SESSION_KEY, undefined);
+  public clearSession(): void {
+    this.session = null;
   }
 }
