@@ -1,7 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { isPathSafe } from '../shared/validation';
+
+// Safely resolve vscode when running inside extension host; fallback to undefined in standalone/test runners
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let vscodeModule: any;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  vscodeModule = require('vscode');
+} catch {
+  vscodeModule = undefined;
+}
 
 export class WorkspaceManager {
   private workspaceRoot: string;
@@ -10,7 +19,7 @@ export class WorkspaceManager {
     if (customRoot) {
       this.workspaceRoot = path.resolve(customRoot);
     } else {
-      const folders = vscode.workspace.workspaceFolders;
+      const folders = vscodeModule?.workspace?.workspaceFolders;
       this.workspaceRoot = folders && folders.length > 0 ? folders[0].uri.fsPath : process.cwd();
     }
   }
