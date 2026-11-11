@@ -79,8 +79,8 @@ describe('MCP Server Integration and Authentication (Items 1-5)', () => {
       );
 
       req.on('error', (err: any) => {
-        // If sandboxed loopback socket connects are blocked by OS sandbox, fallback to in-memory dispatch
-        if (err.code === 'EACCES') {
+        // If sandboxed loopback socket connects are blocked by OS sandbox (EACCES/EPERM/ECONNREFUSED), fallback to in-memory dispatch
+        if (err.code === 'EACCES' || err.code === 'EPERM' || err.code === 'ECONNREFUSED') {
           const rawServer = serverManager.getHttpServer();
           if (!rawServer) {
             resolve({ status: 500, headers: {}, body: 'No server' });

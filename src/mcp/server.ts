@@ -7,7 +7,6 @@
  */
 
 import * as http from 'http';
-import * as crypto from 'crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -90,13 +89,6 @@ export class ForgeMcpServer {
       this.token = options.token;
     }
 
-    // Connect Streamable HTTP Transport
-    this.streamableTransport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
-      enableJsonResponse: true
-    });
-    await this.mcp.connect(this.streamableTransport);
-
     return new Promise((resolve, reject) => {
       this.server = http.createServer(async (req, res) => {
         try {
@@ -114,10 +106,12 @@ export class ForgeMcpServer {
 
           let isAuthed = false;
           if (providedToken) {
-            if (providedToken === this.token) {
-              isAuthed = true;
-            } else if (this.authenticator) {
+            if (this.authenticator) {
+              // Always use authenticator when available (SecretStorage-based token)
               isAuthed = await this.authenticator.validateToken(providedToken);
+            } else {
+              // Fallback: compare directly against static token
+              isAuthed = providedToken === this.token;
             }
           }
 
@@ -164,12 +158,20 @@ export class ForgeMcpServer {
             return;
           }
 
-          // Streamable HTTP endpoint: POST /mcp
-          if (url.pathname === '/mcp') {
-            if (this.streamableTransport) {
-              await this.streamableTransport.handleRequest(req, res);
-              return;
-            }
+          // Streamable HTTP endpoint: POST /mcp (stateless — new transport per request)
+          if (url.pathname === '/mcp' && req.method === 'POST') {
+            const transport = new StreamableHTTPServerTransport({
+              sessionIdGenerator: undefined, // stateless mode
+              enableJsonResponse: true
+            });
+            const sessionMcp = new McpServer(
+              { name: MCP_CONSTANTS.SERVER_NAME, version: '0.1.0' },
+              { capabilities: { tools: { listChanged: true } } }
+            );
+            registerAllTools(sessionMcp, this.workspace, this.budgetTracker, this.patchStore);
+            await sessionMcp.connect(transport);
+            await transport.handleRequest(req, res);
+            return;
           }
 
           res.writeHead(404, { 'Content-Type': 'application/json' });
