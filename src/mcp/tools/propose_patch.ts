@@ -1,33 +1,104 @@
-/**
- * propose_patch MCP tool
- */
-
-import { z } from 'zod';
+import * as crypto from 'crypto';
+import * as diff from 'diff';
+import { WorkspaceManager } from '../workspace';
+import { PatchStore, defaultPatchStore, StagedHunk, StagedPatch } from '../../review/store';
+import { validateHunk } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
 
-export const ProposePatchInput = z.object({
-  targetFile: z.string().describe('File to patch'),
-  summary: z.string().describe('Summary of the patch'),
-  hunks: z.array(z.object({
-    id: z.string(),
-    file: z.string(),
-    oldStart: z.number().int(),
-    oldLines: z.number().int(),
-    newStart: z.number().int(),
-    newLines: z.number().int(),
-    content: z.string()
-  })).describe('Array of diff hunks')
-});
+export interface ProposePatchParams {
+  target_file: string;
+  patch: string;
+  summary: string;
+}
 
-export type ProposePatchInput = z.infer<typeof ProposePatchInput>;
+export interface ProposePatchResult {
+  patch_id: string;
+  target_file: string;
+  hunk_ids: string[];
+  hunks_count: number;
+  summary: string;
+  rawText: string;
+}
 
-export function makeProposePatchTool() {
-  return {
-    name: 'propose_patch',
-    description: 'Propose a structured patch consisting of one or more hunks.',
-    inputSchema: ProposePatchInput,
-    async execute(input: ProposePatchInput): Promise<string> {
-      return sanitizeToolOutput(`Patch proposed for ${input.targetFile} with ${input.hunks.length} hunk(s): ${input.summary}`);
+export async function executeProposePatch(
+  params: ProposePatchParams,
+  workspaceManager: WorkspaceManager,
+  patchStore: PatchStore = defaultPatchStore
+): Promise<ProposePatchResult> {
+  const { target_file, patch: patchText, summary } = params;
+
+  if (!target_file || typeof target_file !== 'string') {
+    throw new Error('target_file must be a non-empty string');
+  }
+  if (!patchText || typeof patchText !== 'string') {
+    throw new Error('patch content must be a non-empty string');
+  }
+
+  // Security check: validate target path
+  workspaceManager.resolveSafePath(target_file);
+
+  const parsed = diff.parsePatch(patchText);
+  const stagedHunks: StagedHunk[] = [];
+
+  if (parsed && parsed.length > 0) {
+    for (const fileDiff of parsed) {
+      for (const h of fileDiff.hunks) {
+        const hunkId = `hunk-${crypto.randomUUID()}`;
+        const hunkContent = h.lines.join('\n');
+        const hunk: StagedHunk = {
+          id: hunkId,
+          file: target_file,
+          oldStart: h.oldStart,
+          oldLines: h.oldLines,
+          newStart: h.newStart,
+          newLines: h.newLines,
+          content: hunkContent
+        };
+        if (!validateHunk(hunk)) {
+          throw new Error(`Parsed hunk ${hunkId} failed security or structural validation`);
+        }
+        stagedHunks.push(hunk);
+      }
     }
+  } else {
+    // If unified diff headers were omitted, wrap in a single hunk
+    const hunkId = `hunk-${crypto.randomUUID()}`;
+    const hunk: StagedHunk = {
+      id: hunkId,
+      file: target_file,
+      oldStart: 1,
+      oldLines: 0,
+      newStart: 1,
+      newLines: 0,
+      content: patchText
+    };
+    if (!validateHunk(hunk)) {
+      throw new Error(`Proposed patch failed security or structural validation`);
+    }
+    stagedHunks.push(hunk);
+  }
+
+  const patchId = `patch-${crypto.randomUUID()}`;
+  const stagedPatch: StagedPatch = {
+    id: patchId,
+    targetFile: target_file,
+    hunks: stagedHunks,
+    summary: summary || 'Proposed patch',
+    createdAt: Date.now()
+  };
+
+  // Stage patch in memory only - NEVER write to disk!
+  patchStore.stagePatch(stagedPatch);
+
+  const hunkIds = stagedHunks.map(h => h.id);
+  const resultSummary = `Staged patch ${patchId} for ${target_file} (${stagedHunks.length} hunks). Changes held in-memory for review.`;
+
+  return {
+    patch_id: patchId,
+    target_file,
+    hunk_ids: hunkIds,
+    hunks_count: stagedHunks.length,
+    summary: stagedPatch.summary,
+    rawText: sanitizeToolOutput(resultSummary)
   };
 }

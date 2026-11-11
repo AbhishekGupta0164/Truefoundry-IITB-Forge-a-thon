@@ -40,7 +40,17 @@ export const SECURITY_ALLOWLIST = {
     'python -m pytest',
     'npm test',
     'git diff',
-    'git status'
+    'git status',
+    'pytest tests/test_cli.py -q',
+    'flask --help'
+  ],
+  ALLOWED_EXECUTABLES: [
+    'git',
+    'pytest',
+    'python',
+    'python3',
+    'flask',
+    'npm'
   ],
   ALLOWED_HOST: '127.0.0.1'
 } as const;

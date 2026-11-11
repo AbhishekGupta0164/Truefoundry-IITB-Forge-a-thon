@@ -1,22 +1,37 @@
 /**
- * Forge Workspace MCP Server (Stage 1 M2)
+ * Forge Workspace MCP Server (Stage 2)
  *
- * Implements MCP over HTTP SSE at 127.0.0.1:8765.
- * Enforces Bearer token authentication on /mcp and /sse.
+ * Implements MCP over Streamable HTTP and SSE at 127.0.0.1:8765.
+ * Enforces Bearer token authentication on /mcp, /sse, and /messages.
+ * Integrates all 9 workspace tools with security and context budgets.
  */
 
 import * as http from 'http';
+import * as crypto from 'crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { z } from 'zod';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { MCP_CONSTANTS } from '../shared/constants';
 import { WorkspaceManager } from './workspace';
-import { applyHunkToFile } from '../review/apply';
+import { ContextBudgetTracker } from '../context/budget';
+import { PatchStore, defaultPatchStore } from '../review/store';
+import { MCPAuthenticator } from './auth';
+import { registerAllTools } from './registry';
 
 export interface McpServerOptions {
   port?: number;
   token?: string;
   workspaceRoot?: string;
+  workspaceManager?: WorkspaceManager;
+  budgetTracker?: ContextBudgetTracker;
+  patchStore?: PatchStore;
+}
+
+export interface MCPServerInfo {
+  port: number;
+  host: string;
+  endpoint: string;
+  serverName: string;
 }
 
 export class ForgeMcpServer {
@@ -25,130 +40,264 @@ export class ForgeMcpServer {
   private token: string;
   private port: number;
   private workspace: WorkspaceManager;
-  private transports = new Map<string, SSEServerTransport>();
+  private budgetTracker: ContextBudgetTracker;
+  private patchStore: PatchStore;
+  private sseTransports = new Map<string, SSEServerTransport>();
+  private streamableTransport: StreamableHTTPServerTransport | null = null;
+  private running = false;
+  private authenticator?: MCPAuthenticator;
 
-  constructor(options: McpServerOptions = {}) {
+  constructor(options: McpServerOptions = {}, authenticator?: MCPAuthenticator) {
     this.port = options.port ?? MCP_CONSTANTS.DEFAULT_PORT;
-    this.token = options.token ?? (process.env.FORGE_MCP_TOKEN || 'forge-secret-token');
-    this.workspace = new WorkspaceManager(options.workspaceRoot);
+    this.token = options.token ?? (process.env.FORGE_MCP_TOKEN || 'forge-dev-token-secret-12345');
+    this.workspace = options.workspaceManager ?? new WorkspaceManager(options.workspaceRoot);
+    this.budgetTracker = options.budgetTracker ?? new ContextBudgetTracker();
+    this.patchStore = options.patchStore ?? defaultPatchStore;
+    this.authenticator = authenticator;
 
-    this.mcp = new McpServer({
-      name: MCP_CONSTANTS.SERVER_NAME,
-      version: '0.1.0'
-    });
+    this.mcp = new McpServer(
+      {
+        name: MCP_CONSTANTS.SERVER_NAME,
+        version: '0.1.0'
+      },
+      {
+        capabilities: {
+          tools: {
+            listChanged: true
+          }
+        }
+      }
+    );
 
     this.registerTools();
   }
 
   private registerTools(): void {
-    // S2: ping tool
-    this.mcp.tool(
-      'ping',
-      'Minimal connectivity test tool. Returns pong.',
-      {},
-      async () => {
-        return { content: [{ type: 'text', text: 'pong' }] };
-      }
-    );
-
-    // S3/S4: apply_patch_hunk tool
-    this.mcp.tool(
-      'apply_patch_hunk',
-      'Apply a unified diff hunk to a file. Requires user approval.',
-      {
-        hunkId: z.string().describe('Unique ID of the hunk'),
-        file: z.string().describe('Target relative file path'),
-        oldStart: z.number().describe('1-based line number where old chunk starts'),
-        oldLines: z.number().describe('Line count in old chunk'),
-        newStart: z.number().describe('1-based line number where new chunk starts'),
-        newLines: z.number().describe('Line count in new chunk'),
-        content: z.string().describe('Diff hunk content')
-      },
-      async (args) => {
-        const absPath = this.workspace.resolveSafePath(args.file);
-        applyHunkToFile(absPath, {
-          id: args.hunkId,
-          file: args.file,
-          oldStart: args.oldStart,
-          oldLines: args.oldLines,
-          newStart: args.newStart,
-          newLines: args.newLines,
-          content: args.content
-        });
-        return { content: [{ type: 'text', text: `Hunk ${args.hunkId} applied successfully to ${args.file}` }] };
-      }
-    );
+    // Register all tools: ping, search_text, search_symbols, read_file, find_related,
+    // propose_patch, propose_edit, apply_patch_hunk, and run_terminal_command
+    registerAllTools(this.mcp, this.workspace, this.budgetTracker, this.patchStore);
   }
 
-  public async start(): Promise<void> {
+  public async start(options: McpServerOptions = {}): Promise<void> {
+    if (this.running) {
+      return;
+    }
+
+    if (options.port) {
+      this.port = options.port;
+    }
+    if (options.token) {
+      this.token = options.token;
+    }
+
+    // Connect Streamable HTTP Transport
+    this.streamableTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      enableJsonResponse: true
+    });
+    await this.mcp.connect(this.streamableTransport);
+
     return new Promise((resolve, reject) => {
       this.server = http.createServer(async (req, res) => {
-        const url = new URL(req.url ?? '/', `http://${req.headers.host || '127.0.0.1'}`);
+        try {
+          const url = new URL(req.url ?? '/', `http://${req.headers.host || MCP_CONSTANTS.HOST}`);
 
-        // Auth check for /mcp, /sse, and /messages
-        const authHeader = req.headers.authorization;
-        const queryToken = url.searchParams.get('token');
-        const isAuthed =
-          (authHeader && authHeader === `Bearer ${this.token}`) ||
-          (queryToken && queryToken === this.token);
+          // Auth check on /mcp, /sse, and /messages
+          const authHeader = req.headers.authorization;
+          let providedToken: string | undefined;
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+            providedToken = authHeader.slice(7).trim();
+          }
+          if (!providedToken) {
+            providedToken = url.searchParams.get('token') || undefined;
+          }
 
-        if (!isAuthed) {
-          res.writeHead(401, {
-            'Content-Type': 'application/json',
-            'WWW-Authenticate': 'Bearer realm="Forge"'
-          });
-          res.end(JSON.stringify({ error: 'Unauthorized: valid Bearer token required' }));
-          return;
-        }
+          let isAuthed = false;
+          if (providedToken) {
+            if (providedToken === this.token) {
+              isAuthed = true;
+            } else if (this.authenticator) {
+              isAuthed = await this.authenticator.validateToken(providedToken);
+            }
+          }
 
-        if (url.pathname === '/sse' || url.pathname === '/mcp') {
-          // SSE connect endpoint
-          const transport = new SSEServerTransport('/messages', res);
-          const sessionId = transport.sessionId;
-          this.transports.set(sessionId, transport);
-
-          transport.onclose = () => {
-            this.transports.delete(sessionId);
-          };
-
-          await this.mcp.connect(transport);
-          return;
-        }
-
-        if (url.pathname === '/messages') {
-          const sessionId = url.searchParams.get('sessionId');
-          const transport = sessionId ? this.transports.get(sessionId) : undefined;
-          if (!transport) {
-            res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Session not found' }));
+          if (!isAuthed) {
+            res.writeHead(401, {
+              'Content-Type': 'application/json',
+              'WWW-Authenticate': 'Bearer realm="Forge"'
+            });
+            res.end(JSON.stringify({ error: 'Unauthorized: missing or invalid bearer token' }));
             return;
           }
-          await transport.handlePostMessage(req, res);
-          return;
-        }
 
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not found' }));
+          // SSE endpoints: /sse or GET /mcp
+          if (url.pathname === '/sse' || (url.pathname === '/mcp' && req.method === 'GET')) {
+            const transport = new SSEServerTransport('/messages', res);
+            const sessionId = transport.sessionId;
+            this.sseTransports.set(sessionId, transport);
+
+            transport.onclose = () => {
+              this.sseTransports.delete(sessionId);
+            };
+
+            // Connect a session MCP instance for this SSE client
+            const sessionMcp = new McpServer(
+              { name: MCP_CONSTANTS.SERVER_NAME, version: '0.1.0' },
+              { capabilities: { tools: { listChanged: true } } }
+            );
+            registerAllTools(sessionMcp, this.workspace, this.budgetTracker, this.patchStore);
+
+            await sessionMcp.connect(transport);
+            return;
+          }
+
+          // SSE message endpoint
+          if (url.pathname === '/messages') {
+            const sessionId = url.searchParams.get('sessionId');
+            const transport = sessionId ? this.sseTransports.get(sessionId) : undefined;
+            if (!transport) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Session not found' }));
+              return;
+            }
+            await transport.handlePostMessage(req, res);
+            return;
+          }
+
+          // Streamable HTTP endpoint: POST /mcp
+          if (url.pathname === '/mcp') {
+            if (this.streamableTransport) {
+              await this.streamableTransport.handleRequest(req, res);
+              return;
+            }
+          }
+
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Not found: ${url.pathname}` }));
+        } catch (err: any) {
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err?.message || String(err) }));
+          }
+        }
       });
 
-      this.server.on('error', reject);
-      this.server.listen(this.port, '127.0.0.1', () => {
+      this.server.on('error', (err) => {
+        this.running = false;
+        reject(err);
+      });
+
+      this.server.listen(this.port, MCP_CONSTANTS.HOST, () => {
+        this.running = true;
         resolve();
       });
     });
   }
 
   public async stop(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.server) {
-        this.server.close(() => resolve());
-      } else {
-        resolve();
+    if (!this.running && !this.server) {
+      return;
+    }
+
+    try {
+      if (this.streamableTransport) {
+        await this.streamableTransport.close();
       }
-    });
+    } catch {
+      // ignore
+    }
+
+    try {
+      await this.mcp.close();
+    } catch {
+      // ignore
+    }
+
+    if (this.server) {
+      await new Promise<void>((resolve) => {
+        this.server?.close(() => resolve());
+      });
+      this.server = null;
+    }
+
+    this.streamableTransport = null;
+    this.running = false;
   }
 
   public getToken(): string {
     return this.token;
+  }
+
+  public getPort(): number {
+    return this.port;
+  }
+
+  public getHost(): string {
+    return MCP_CONSTANTS.HOST;
+  }
+
+  public isRunning(): boolean {
+    return this.running;
+  }
+
+  public getHttpServer(): http.Server | null {
+    return this.server;
+  }
+}
+
+/**
+ * Adapter class preserving MCPServerManager API for VS Code extension lifecycle and unit tests.
+ */
+export class MCPServerManager {
+  private forgeServer: ForgeMcpServer;
+
+  constructor(
+    authenticator?: MCPAuthenticator,
+    workspaceManager: WorkspaceManager = new WorkspaceManager(),
+    budgetTracker: ContextBudgetTracker = new ContextBudgetTracker(),
+    patchStore: PatchStore = defaultPatchStore
+  ) {
+    this.forgeServer = new ForgeMcpServer(
+      {
+        workspaceManager,
+        budgetTracker,
+        patchStore
+      },
+      authenticator
+    );
+  }
+
+  public isRunning(): boolean {
+    return this.forgeServer.isRunning();
+  }
+
+  public getPort(): number {
+    return this.forgeServer.getPort();
+  }
+
+  public getHost(): string {
+    return this.forgeServer.getHost();
+  }
+
+  public getHttpServer(): http.Server | null {
+    return this.forgeServer.getHttpServer();
+  }
+
+  public async getToken(): Promise<string> {
+    return this.forgeServer.getToken();
+  }
+
+  public async start(options: { port?: number; host?: string } = {}): Promise<MCPServerInfo> {
+    await this.forgeServer.start({ port: options.port });
+    return {
+      port: this.forgeServer.getPort(),
+      host: this.forgeServer.getHost(),
+      endpoint: '/mcp',
+      serverName: MCP_CONSTANTS.SERVER_NAME
+    };
+  }
+
+  public async stop(): Promise<void> {
+    await this.forgeServer.stop();
   }
 }

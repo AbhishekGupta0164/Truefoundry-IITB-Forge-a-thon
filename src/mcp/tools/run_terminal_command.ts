@@ -1,45 +1,99 @@
-/**
- * run_terminal_command MCP tool
- * Strictly enforces security allowlist of commands.
- */
-
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { z } from 'zod';
+import * as child_process from 'child_process';
 import { WorkspaceManager } from '../workspace';
-import { isCommandAllowed } from '../../shared/validation';
+import { validateArgv } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
 
-const execAsync = promisify(exec);
+export interface RunTerminalCommandParams {
+  argv: string[];
+  timeoutMs?: number;
+}
 
-export const RunTerminalCommandInput = z.object({
-  command: z.string().describe('Terminal command to execute (must be in security allowlist)')
-});
+export interface RunTerminalCommandResult {
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  rawText: string;
+}
 
-export type RunTerminalCommandInput = z.infer<typeof RunTerminalCommandInput>;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_STDOUT_LENGTH = 20_000;
 
-export function makeRunTerminalCommandTool(workspace: WorkspaceManager) {
-  return {
-    name: 'run_terminal_command',
-    description: 'Run an allowed terminal command (e.g. pytest, git status, git diff) in the workspace.',
-    inputSchema: RunTerminalCommandInput,
-    async execute(input: RunTerminalCommandInput): Promise<string> {
-      if (!isCommandAllowed(input.command)) {
-        return sanitizeToolOutput(`Security Violation: Command '${input.command}' is not in the allowed list.`);
+export async function executeRunTerminalCommand(
+  params: RunTerminalCommandParams,
+  workspaceManager: WorkspaceManager
+): Promise<RunTerminalCommandResult> {
+  const { argv, timeoutMs = DEFAULT_TIMEOUT_MS } = params;
+
+  // 1. Validate argv
+  const validation = validateArgv(argv);
+  if (!validation.allowed) {
+    throw new Error(`Command rejected by security policy: ${validation.reason}`);
+  }
+
+  const [executable, ...args] = argv;
+  const cwd = workspaceManager.getRoot();
+
+  // If a local virtualenv exists in cwd, prioritize its bin/Scripts in PATH
+  const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: '1' };
+  const venvDir = require('path').join(cwd, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin');
+  if (require('fs').existsSync(venvDir)) {
+    env.PATH = `${venvDir}${require('path').delimiter}${process.env.PATH || ''}`;
+  }
+
+  return new Promise((resolve) => {
+    let stdoutData = '';
+    let stderrData = '';
+    let timedOut = false;
+
+    // Strict security execution: never shell: true!
+    const proc = child_process.spawn(executable, args, {
+      cwd,
+      shell: false,
+      timeout: timeoutMs,
+      env
+    });
+
+    proc.stdout.on('data', (chunk) => {
+      stdoutData += chunk.toString();
+      if (stdoutData.length > MAX_STDOUT_LENGTH) {
+        stdoutData = stdoutData.slice(0, MAX_STDOUT_LENGTH);
       }
+    });
 
-      try {
-        const { stdout, stderr } = await execAsync(input.command, {
-          cwd: workspace.getRoot(),
-          timeout: 30000
-        });
-        const out = stdout || stderr || '(No output)';
-        return sanitizeToolOutput(out);
-      } catch (err: unknown) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const error = err as any;
-        return sanitizeToolOutput(`Command failed with exit code ${error.code ?? 1}:\n${error.stdout || ''}\n${error.stderr || error.message}`);
+    proc.stderr.on('data', (chunk) => {
+      stderrData += chunk.toString();
+      if (stderrData.length > MAX_STDOUT_LENGTH) {
+        stderrData = stderrData.slice(0, MAX_STDOUT_LENGTH);
       }
-    }
-  };
+    });
+
+    proc.on('error', (err: any) => {
+      const isTimeout = err.code === 'ETIMEDOUT';
+      resolve({
+        command: argv.join(' '),
+        exitCode: err.code === 'ENOENT' ? 127 : 1,
+        stdout: stdoutData,
+        stderr: `${stderrData}\nProcess error: ${err.message}`,
+        timedOut: isTimeout,
+        rawText: sanitizeToolOutput(`Command failed: ${err.message}`)
+      });
+    });
+
+    proc.on('close', (code, signal) => {
+      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+        timedOut = true;
+      }
+      const combined = `Exit Code: ${code}\nSTDOUT:\n${stdoutData}\nSTDERR:\n${stderrData}`;
+      resolve({
+        command: argv.join(' '),
+        exitCode: code,
+        stdout: stdoutData,
+        stderr: stderrData,
+        timedOut,
+        rawText: sanitizeToolOutput(combined)
+      });
+    });
+  });
 }
