@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
 import { MCPAuthenticator } from './mcp/auth';
 import { MCPServerManager } from './mcp/server';
+import { defaultInlineEditController } from './ui/inline-edit';
+import { defaultAgentPanel } from './ui/panel';
+import { defaultCancelManager } from './review/cancel';
+import { defaultUndoManager } from './review/undo';
+import { defaultCodeLensProvider } from './review/codelens';
+import { defaultStatusBar } from './ui/status-bar';
+import { defaultDiffViewManager } from './review/diff-view';
 
 let mcpServerManager: MCPServerManager | null = null;
 
@@ -21,20 +28,55 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.showErrorMessage(`Failed to start Forge MCP server: ${err.message}`);
   }
 
+  // Stage 4: Inline Edit command (Cmd+Alt+K)
   const inlineEditCmd = vscode.commands.registerCommand('forge.inlineEdit', async () => {
-    vscode.window.showInformationMessage('Forge: Inline Edit initiated');
+    await defaultInlineEditController.trigger();
   });
 
+  // Hunk review commands (CodeLens actions)
+  const acceptHunkCmd = vscode.commands.registerCommand(
+    'forge.acceptHunk',
+    async (patchId: string, hunkId: string) => {
+      await defaultInlineEditController.acceptHunk(patchId, hunkId);
+    }
+  );
+
+  const rejectHunkCmd = vscode.commands.registerCommand(
+    'forge.rejectHunk',
+    async (patchId: string, hunkId: string) => {
+      await defaultInlineEditController.rejectHunk(patchId, hunkId);
+    }
+  );
+
+  // Agent Webview Panel
   const openPanelCmd = vscode.commands.registerCommand('forge.openPanel', () => {
-    vscode.window.showInformationMessage('Forge: Opening Agent Panel');
+    defaultAgentPanel.show();
   });
 
+  // Cancel active run
   const cancelCmd = vscode.commands.registerCommand('forge.cancel', () => {
-    vscode.window.showInformationMessage('Forge: Run cancelled');
+    const stats = defaultCancelManager.cancelAll();
+    if (vscode.window.activeTextEditor) {
+      defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
+    }
+    defaultCodeLensProvider.refresh();
+    defaultStatusBar.setReady();
+    vscode.window.showInformationMessage(
+      `Forge: Run cancelled (${stats.cancelledPatches} patches discarded)`
+    );
   });
 
-  const undoTaskCmd = vscode.commands.registerCommand('forge.undoTask', () => {
-    vscode.window.showInformationMessage('Forge: Whole Task Undone');
+  // Undo whole task
+  const undoTaskCmd = vscode.commands.registerCommand('forge.undoTask', async () => {
+    const res = await defaultUndoManager.undoTask();
+    if (vscode.window.activeTextEditor) {
+      defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
+    }
+    defaultCodeLensProvider.refresh();
+    defaultStatusBar.setReady();
+    vscode.window.showInformationMessage(
+      `Forge: Whole task undone (${res.revertedFiles.length} file(s) reverted)`
+    );
   });
 
   const copyMcpConfigCmd = vscode.commands.registerCommand('forge.copyMcpConfig', async () => {
@@ -61,14 +103,25 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage('Forge: MCP connector settings copied to clipboard');
   });
 
+  // Register CodeLens provider for reviewing staged hunks
+  const codeLensDisposable = vscode.languages.registerCodeLensProvider(
+    { pattern: '**/*' },
+    defaultCodeLensProvider
+  );
+
   context.subscriptions.push(
     inlineEditCmd,
+    acceptHunkCmd,
+    rejectHunkCmd,
     openPanelCmd,
     cancelCmd,
     undoTaskCmd,
     copyMcpConfigCmd,
+    codeLensDisposable,
     {
       dispose: () => {
+        defaultStatusBar.dispose();
+        defaultDiffViewManager.dispose();
         if (mcpServerManager) {
           mcpServerManager.stop().catch(console.error);
         }
