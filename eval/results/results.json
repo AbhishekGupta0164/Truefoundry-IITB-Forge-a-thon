@@ -1,0 +1,50 @@
+[
+  {
+    "model": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
+    "task": "Task A (Inline Edit)",
+    "result": "FAIL",
+    "latencyMs": 16758,
+    "tokensUsed": 0,
+    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+  },
+  {
+    "model": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
+    "task": "Task B (Agent CLI Command)",
+    "result": "FAIL",
+    "latencyMs": 10296,
+    "tokensUsed": 0,
+    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+  },
+  {
+    "model": "Gemini 1.5 Flash (Hosted Free-Tier Model)",
+    "task": "Task A (Inline Edit)",
+    "result": "FAIL",
+    "latencyMs": 7069,
+    "tokensUsed": 0,
+    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+  },
+  {
+    "model": "Gemini 1.5 Flash (Hosted Free-Tier Model)",
+    "task": "Task B (Agent CLI Command)",
+    "result": "FAIL",
+    "latencyMs": 7044,
+    "tokensUsed": 0,
+    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+  },
+  {
+    "model": "Llama 3.2 3B (Local Evaluation Model)",
+    "task": "Task A (Inline Edit)",
+    "result": "FAIL",
+    "latencyMs": 7049,
+    "tokensUsed": 0,
+    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+  },
+  {
+    "model": "Llama 3.2 3B (Local Evaluation Model)",
+    "task": "Task B (Agent CLI Command)",
+    "result": "FAIL",
+    "latencyMs": 7049,
+    "tokensUsed": 0,
+    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+  }
+]
