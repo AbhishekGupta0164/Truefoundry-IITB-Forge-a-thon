@@ -61,7 +61,8 @@ export async function verifyStage4Fixture(targetDir?: string) {
   fs.writeFileSync(fullPath, updatedContent, 'utf-8');
 
   // Verify FLASK_DEBUG=off
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const venvPython = path.join(flaskDir, '.venv', 'bin', 'python');
+  const pythonCmd = fs.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
   const checkCmd = 'from flask.helpers import get_debug_flag; print(get_debug_flag())';
 
   try {

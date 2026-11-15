@@ -34,6 +34,10 @@ export async function verifyStage5Fixture(targetDir?: string) {
   }
 
   const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const venvPytest = path.join(flaskDir, '.venv', 'bin', 'pytest');
+  const pytestBin = fs.existsSync(venvPytest) ? venvPytest : 'pytest';
+  const venvFlask = path.join(flaskDir, '.venv', 'bin', 'flask');
+  const flaskBin = fs.existsSync(venvFlask) ? venvFlask : 'flask';
 
   const cliPyPath = path.join(flaskDir, 'src', 'flask', 'cli.py');
   const testCliPath = path.join(flaskDir, 'tests', 'test_cli.py');
@@ -241,7 +245,9 @@ app.config["SITE_NAME"] = "TrueFoundry Demo Site"
   }
 }
 
-verifyStage5().catch((err) => {
-  console.error('Stage 5 verification failed:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  verifyStage5Fixture().catch((err) => {
+    console.error('Stage 5 verification failed:', err);
+    process.exit(1);
+  });
+}

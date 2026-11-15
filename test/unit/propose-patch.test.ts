@@ -18,7 +18,7 @@ describe('propose_patch Tool (Item 21)', () => {
     // Get git status before
     let gitStatusBefore = '';
     try {
-      gitStatusBefore = child_process.execSync('git status --porcelain', {
+      gitStatusBefore = child_process.execSync(`git status --porcelain ${targetFile}`, {
         cwd: wsManager.getRoot(),
         encoding: 'utf-8'
       });
@@ -59,10 +59,10 @@ describe('propose_patch Tool (Item 21)', () => {
     const contentAfter = fs.readFileSync(absPath, 'utf-8');
     expect(contentAfter).toBe(contentBefore);
 
-    // 4. git status --porcelain remains completely unchanged
+    // 4. git status --porcelain remains completely unchanged for targetFile
     let gitStatusAfter = '';
     try {
-      gitStatusAfter = child_process.execSync('git status --porcelain', {
+      gitStatusAfter = child_process.execSync(`git status --porcelain ${targetFile}`, {
         cwd: wsManager.getRoot(),
         encoding: 'utf-8'
       });

@@ -2,6 +2,11 @@
   "name": "forge-agent",
   "displayName": "Forge Agent",
   "version": "0.1.0",
+  "publisher": "truefoundry",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AbhishekGupta0164/Truefoundry-IITB-Forge-a-thon"
+  },
   "engines": {
     "vscode": "^1.90.0",
     "node": ">=22.14"

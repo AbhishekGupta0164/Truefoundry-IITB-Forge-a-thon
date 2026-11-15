@@ -37,17 +37,20 @@ export class AgentPanelProvider {
       return;
     }
 
+    const distUri = this.extensionUri && vscodeModule ? vscodeModule.Uri.joinPath(this.extensionUri, 'dist') : undefined;
+
     this.panel = vscodeModule.window.createWebviewPanel(
       AgentPanelProvider.viewType,
       'Forge Agent',
       vscodeModule.ViewColumn.Beside,
       {
         enableScripts: true,
-        retainContextWhenHidden: true
+        retainContextWhenHidden: true,
+        localResourceRoots: distUri ? [distUri] : []
       }
     );
 
-    this.panel.webview.html = this.getHtml();
+    this.panel.webview.html = this.getHtml(this.panel.webview);
 
     this.panel.webview.onDidReceiveMessage(async (msg: WebviewIncomingMessage) => {
       // Execute any registered custom handlers
@@ -171,23 +174,45 @@ export class AgentPanelProvider {
     this.messageHandlers.push(handler);
   }
 
-  private getHtml(): string {
+  private getNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+      text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+  }
+
+  private getHtml(webview?: vscodeTypes.Webview): string {
+    const nonce = this.getNonce();
+    let scriptUri = '';
+    let styleUri = '';
+    const cspSource = webview?.cspSource || "'self'";
+
+    if (this.extensionUri && vscodeModule && webview) {
+      try {
+        scriptUri = webview.asWebviewUri(vscodeModule.Uri.joinPath(this.extensionUri, 'dist', 'webview.js')).toString();
+        styleUri = webview.asWebviewUri(vscodeModule.Uri.joinPath(this.extensionUri, 'dist', 'styles.css')).toString();
+      } catch {
+        // Fallback for mocked environments
+      }
+    }
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Forge Agent</title>
+  ${styleUri ? `<link rel="stylesheet" href="${styleUri}">` : ''}
   <style>
-    body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground); background-color: var(--vscode-editor-background); padding: 16px; }
-    .header { font-size: 1.2em; font-weight: bold; margin-bottom: 12px; }
-    .status { padding: 8px; border-radius: 4px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); display: inline-block; margin-bottom: 12px; }
-    .chat-box { width: 100%; border: 1px solid var(--vscode-input-border); background: var(--vscode-input-background); color: var(--vscode-input-foreground); padding: 8px; box-sizing: border-box; }
+    body { font-family: var(--vscode-font-family, sans-serif); color: var(--vscode-foreground); background-color: var(--vscode-editor-background); padding: 12px; }
   </style>
 </head>
 <body>
-  <div class="header">Forge Agent</div>
-  <div class="status">Connected to TrueForge</div>
-  <div id="timeline"></div>
+  <div id="app"></div>
+  ${scriptUri ? `<script nonce="${nonce}" src="${scriptUri}"></script>` : ''}
 </body>
 </html>`;
   }
