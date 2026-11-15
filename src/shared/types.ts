@@ -30,6 +30,38 @@ export interface Patch {
   createdAt: number;
 }
 
+export type ReviewStatus = 'pending' | 'accepted' | 'rejected' | 'stale' | 'applied' | 'failed';
+
+export interface ReviewHunk extends Hunk {
+  status?: ReviewStatus;
+  applied?: boolean;
+  approved?: boolean;
+  staleReason?: string;
+  appliedAt?: number;
+  taskId?: string;
+}
+
+export interface ReviewPatch extends Patch {
+  hunks: ReviewHunk[];
+  initialContent?: string;
+  targetVersion?: number;
+  taskId?: string;
+}
+
+export interface InverseEdit {
+  taskId: string;
+  patchId: string;
+  hunkId: string;
+  file: string;
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  originalLines: string[];
+  replacementLines: string[];
+  timestamp: number;
+}
+
 export interface ContextEntry {
   id: string;
   type: 'file' | 'symbol' | 'snippet' | 'rule' | 'diff';
