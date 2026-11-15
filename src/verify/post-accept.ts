@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import { SECURITY_ALLOWLIST } from '../shared/constants';
+import { validateFile, ValidationResult } from '../review/validate';
 
 export interface PytestResult {
   success: boolean;
@@ -67,7 +68,6 @@ export async function runPostAcceptPytest(
       const combined = stdout + '\n' + stderr;
       let summary = combined.trim();
 
-      // Parse counts like: "55 passed, 3 skipped in 0.79s"
       const match = combined.match(/(\d+)\s+passed(?:,\s*(\d+)\s+skipped)?(?:,\s*(\d+)\s+failed)?/i);
       const passedCount = match && match[1] ? parseInt(match[1], 10) : undefined;
       const skippedCount = match && match[2] ? parseInt(match[2], 10) : undefined;
@@ -95,4 +95,22 @@ export async function runPostAcceptPytest(
       });
     });
   });
+}
+
+export interface PostAcceptResult {
+  filePath: string;
+  syntaxValid: boolean;
+  errors: string[];
+}
+
+/**
+ * Runs post-accept verification on a modified file.
+ */
+export async function runPostAcceptCheck(filePath: string, workspaceRoot?: string): Promise<PostAcceptResult> {
+  const result: ValidationResult = await validateFile(filePath, workspaceRoot);
+  return {
+    filePath,
+    syntaxValid: result.valid,
+    errors: result.errors
+  };
 }
