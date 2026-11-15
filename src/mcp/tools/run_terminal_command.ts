@@ -1,99 +1,57 @@
-import * as child_process from 'child_process';
+import { spawn } from 'child_process';
+import { isCommandAllowed } from '../../shared/validation';
 import { WorkspaceManager } from '../workspace';
-import { validateArgv } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
 
-export interface RunTerminalCommandParams {
-  argv: string[];
-  timeoutMs?: number;
-}
-
-export interface RunTerminalCommandResult {
+export interface RunTerminalCommandInput {
   command: string;
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  rawText: string;
 }
-
-const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_STDOUT_LENGTH = 20_000;
 
 export async function executeRunTerminalCommand(
-  params: RunTerminalCommandParams,
-  workspaceManager: WorkspaceManager
-): Promise<RunTerminalCommandResult> {
-  const { argv, timeoutMs = DEFAULT_TIMEOUT_MS } = params;
-
-  // 1. Validate argv
-  const validation = validateArgv(argv);
-  if (!validation.allowed) {
-    throw new Error(`Command rejected by security policy: ${validation.reason}`);
+  input: RunTerminalCommandInput,
+  workspace: WorkspaceManager
+): Promise<{ success: boolean; output?: string; error?: string }> {
+  if (!input.command || !isCommandAllowed(input.command)) {
+    return {
+      success: false,
+      error: `Security violation: Command '${input.command}' is not on the allowlist.`
+    };
   }
 
-  const [executable, ...args] = argv;
-  const cwd = workspaceManager.getRoot();
-
-  // If a local virtualenv exists in cwd, prioritize its bin/Scripts in PATH
-  const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: '1' };
-  const venvDir = require('path').join(cwd, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin');
-  if (require('fs').existsSync(venvDir)) {
-    env.PATH = `${venvDir}${require('path').delimiter}${process.env.PATH || ''}`;
-  }
+  const root = workspace.getRoot();
+  const parts = input.command.trim().split(/\s+/);
+  const cmd = parts[0];
+  const args = parts.slice(1);
 
   return new Promise((resolve) => {
-    let stdoutData = '';
-    let stderrData = '';
-    let timedOut = false;
+    let stdout = '';
+    let stderr = '';
 
-    // Strict security execution: never shell: true!
-    const proc = child_process.spawn(executable, args, {
-      cwd,
-      shell: false,
-      timeout: timeoutMs,
-      env
+    const proc = spawn(cmd, args, {
+      cwd: root,
+      shell: false
     });
 
     proc.stdout.on('data', (chunk) => {
-      stdoutData += chunk.toString();
-      if (stdoutData.length > MAX_STDOUT_LENGTH) {
-        stdoutData = stdoutData.slice(0, MAX_STDOUT_LENGTH);
-      }
+      stdout += chunk.toString();
     });
 
     proc.stderr.on('data', (chunk) => {
-      stderrData += chunk.toString();
-      if (stderrData.length > MAX_STDOUT_LENGTH) {
-        stderrData = stderrData.slice(0, MAX_STDOUT_LENGTH);
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      const output = stdout + '\n' + stderr;
+      const sanitized = sanitizeToolOutput(output);
+      if (code === 0) {
+        resolve({ success: true, output: sanitized });
+      } else {
+        resolve({ success: false, output: sanitized, error: `Command exited with code ${code}` });
       }
     });
 
-    proc.on('error', (err: any) => {
-      const isTimeout = err.code === 'ETIMEDOUT';
-      resolve({
-        command: argv.join(' '),
-        exitCode: err.code === 'ENOENT' ? 127 : 1,
-        stdout: stdoutData,
-        stderr: `${stderrData}\nProcess error: ${err.message}`,
-        timedOut: isTimeout,
-        rawText: sanitizeToolOutput(`Command failed: ${err.message}`)
-      });
-    });
-
-    proc.on('close', (code, signal) => {
-      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-        timedOut = true;
-      }
-      const combined = `Exit Code: ${code}\nSTDOUT:\n${stdoutData}\nSTDERR:\n${stderrData}`;
-      resolve({
-        command: argv.join(' '),
-        exitCode: code,
-        stdout: stdoutData,
-        stderr: stderrData,
-        timedOut,
-        rawText: sanitizeToolOutput(combined)
-      });
+    proc.on('error', (err) => {
+      resolve({ success: false, error: err.message });
     });
   });
 }
