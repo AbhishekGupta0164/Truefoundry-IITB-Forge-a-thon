@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { isPathSafe } from '../shared/validation';
 
 export class WorkspaceManager {
@@ -10,8 +9,13 @@ export class WorkspaceManager {
     if (customRoot) {
       this.workspaceRoot = path.resolve(customRoot);
     } else {
-      const folders = vscode.workspace.workspaceFolders;
-      this.workspaceRoot = folders && folders.length > 0 ? folders[0].uri.fsPath : process.cwd();
+      try {
+        const vscode = require('vscode');
+        const folders = vscode.workspace?.workspaceFolders;
+        this.workspaceRoot = folders && folders.length > 0 ? folders[0].uri.fsPath : process.cwd();
+      } catch {
+        this.workspaceRoot = process.cwd();
+      }
     }
   }
 
