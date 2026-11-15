@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { WorkspaceManager } from '../mcp/workspace';
+import { executeSearchSymbols, SymbolLocation } from '../mcp/tools/search_symbols';
 
 export interface SymbolDefinition {
   name: string;
@@ -31,9 +33,6 @@ export class InMemorySymbolIndex {
     return this.workspaceRoot || process.cwd();
   }
 
-  /**
-   * Builds or updates the symbol index for the given file if its mtime changed.
-   */
   public indexFile(filePath: string, content?: string): SymbolDefinition[] {
     const fullPath = path.isAbsolute(filePath)
       ? filePath
@@ -45,7 +44,6 @@ export class InMemorySymbolIndex {
         mtimeMs = fs.statSync(fullPath).mtimeMs;
       }
     } catch {
-      // file might not exist on disk if passed as in-memory content
       mtimeMs = Date.now();
     }
 
@@ -57,7 +55,6 @@ export class InMemorySymbolIndex {
     const source = content !== undefined ? content : (fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : '');
     const symbols = this.parsePythonSymbols(source);
 
-    // Remove previous symbols for this file from allSymbolNames set
     if (cached) {
       this.rebuildAllNamesSet();
     }
@@ -80,16 +77,10 @@ export class InMemorySymbolIndex {
     return symbols;
   }
 
-  /**
-   * Checks if a symbol name is known in the index.
-   */
   public hasSymbol(symbolName: string): boolean {
     return this.allSymbolNames.has(symbolName);
   }
 
-  /**
-   * Search symbols by substring or exact match.
-   */
   public searchSymbols(query: string): SymbolDefinition[] {
     const results: SymbolDefinition[] = [];
     const lowerQuery = query.toLowerCase();
@@ -112,24 +103,14 @@ export class InMemorySymbolIndex {
     return results;
   }
 
-  /**
-   * Get all currently indexed symbols count.
-   */
   public getIndexedFileCount(): number {
     return this.cache.size;
   }
 
-  /**
-   * Get all registered symbol names.
-   */
   public getAllSymbolNames(): Set<string> {
     return new Set(this.allSymbolNames);
   }
 
-  /**
-   * Fast pure-JS AST-like regex parser for Python functions, classes, and methods.
-   * Avoids spawning Python processes.
-   */
   private parsePythonSymbols(code: string): SymbolDefinition[] {
     const lines = code.split('\n');
     const symbols: SymbolDefinition[] = [];
@@ -179,13 +160,12 @@ export class InMemorySymbolIndex {
         if (indent > 0 && currentClass) {
           currentClass.methods?.push(funcDef);
         } else {
-          currentClass = null; // outside class scope
+          currentClass = null;
           symbols.push(funcDef);
         }
         continue;
       }
 
-      // Check if we exited class indentation
       const lineIndent = line.search(/\S/);
       if (lineIndent === 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
         currentClass = null;
@@ -230,3 +210,30 @@ export class InMemorySymbolIndex {
     this.allSymbolNames.clear();
   }
 }
+
+export class SymbolIndex {
+  private cache = new Map<string, SymbolLocation[]>();
+
+  constructor(private workspaceManager: WorkspaceManager = new WorkspaceManager()) {}
+
+  /**
+   * Look up symbols matching a query.
+   */
+  public async findSymbol(query: string): Promise<SymbolLocation[]> {
+    const cached = this.cache.get(query.toLowerCase());
+    if (cached) {
+      return cached;
+    }
+
+    const result = await executeSearchSymbols({ query }, this.workspaceManager);
+    this.cache.set(query.toLowerCase(), result.symbols);
+    return result.symbols;
+  }
+
+  public clear(): void {
+    this.cache.clear();
+  }
+}
+
+export const defaultSymbolIndex = new SymbolIndex();
+

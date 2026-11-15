@@ -1,71 +1,104 @@
+import * as crypto from 'crypto';
 import * as diff from 'diff';
-import { Hunk, Patch } from '../../shared/types';
 import { WorkspaceManager } from '../workspace';
-import { PatchStore, globalPatchStore } from '../../review/store';
+import { PatchStore, defaultPatchStore, StagedHunk, StagedPatch } from '../../review/store';
 import { validateHunk } from '../../shared/validation';
+import { sanitizeToolOutput } from '../sanitize';
 
-export interface ProposePatchInput {
-  patch_content: string;
-  summary?: string;
+export interface ProposePatchParams {
+  target_file: string;
+  patch: string;
+  summary: string;
 }
 
-export function executeProposePatch(
-  input: ProposePatchInput,
-  workspace: WorkspaceManager,
-  store: PatchStore = globalPatchStore
-): { success: boolean; patchId?: string; hunks?: Hunk[]; error?: string } {
-  try {
-    const parsedPatches = diff.parsePatch(input.patch_content);
-    if (!parsedPatches || parsedPatches.length === 0) {
-      return { success: false, error: 'Could not parse patch content as unified diff' };
-    }
+export interface ProposePatchResult {
+  patch_id: string;
+  target_file: string;
+  hunk_ids: string[];
+  hunks_count: number;
+  summary: string;
+  rawText: string;
+}
 
-    const allHunks: Hunk[] = [];
-    let targetFile = '';
+export async function executeProposePatch(
+  params: ProposePatchParams,
+  workspaceManager: WorkspaceManager,
+  patchStore: PatchStore = defaultPatchStore
+): Promise<ProposePatchResult> {
+  const { target_file, patch: patchText, summary } = params;
 
-    for (const parsed of parsedPatches) {
-      const fileName = (parsed.newFileName || parsed.oldFileName || '').replace(/^[ab]\//, '');
-      if (!fileName) continue;
-      targetFile = fileName;
+  if (!target_file || typeof target_file !== 'string') {
+    throw new Error('target_file must be a non-empty string');
+  }
+  if (!patchText || typeof patchText !== 'string') {
+    throw new Error('patch content must be a non-empty string');
+  }
 
-      // Check path safety
-      workspace.resolveSafePath(fileName);
+  // Security check: validate target path
+  workspaceManager.resolveSafePath(target_file);
 
-      if (parsed.hunks) {
-        for (let i = 0; i < parsed.hunks.length; i++) {
-          const h = parsed.hunks[i];
-          const hunk: Hunk = {
-            id: `hunk-${Date.now()}-${allHunks.length + 1}`,
-            file: fileName,
-            oldStart: h.oldStart,
-            oldLines: h.oldLines,
-            newStart: h.newStart,
-            newLines: h.newLines,
-            content: h.lines.join('\n')
-          };
-          if (!validateHunk(hunk)) {
-            return { success: false, error: `Hunk in ${fileName} failed validation` };
-          }
-          allHunks.push(hunk);
+  const parsed = diff.parsePatch(patchText);
+  const stagedHunks: StagedHunk[] = [];
+
+  if (parsed && parsed.length > 0) {
+    for (const fileDiff of parsed) {
+      for (const h of fileDiff.hunks) {
+        const hunkId = `hunk-${crypto.randomUUID()}`;
+        const hunkContent = h.lines.join('\n');
+        const hunk: StagedHunk = {
+          id: hunkId,
+          file: target_file,
+          oldStart: h.oldStart,
+          oldLines: h.oldLines,
+          newStart: h.newStart,
+          newLines: h.newLines,
+          content: hunkContent
+        };
+        if (!validateHunk(hunk)) {
+          throw new Error(`Parsed hunk ${hunkId} failed security or structural validation`);
         }
+        stagedHunks.push(hunk);
       }
     }
-
-    if (allHunks.length === 0) {
-      return { success: false, error: 'No valid hunks found in patch' };
-    }
-
-    const patch: Patch = {
-      id: `patch-${Date.now()}`,
-      targetFile,
-      hunks: allHunks,
-      summary: input.summary || `Patch for ${targetFile}`,
-      createdAt: Date.now()
+  } else {
+    // If unified diff headers were omitted, wrap in a single hunk
+    const hunkId = `hunk-${crypto.randomUUID()}`;
+    const hunk: StagedHunk = {
+      id: hunkId,
+      file: target_file,
+      oldStart: 1,
+      oldLines: 0,
+      newStart: 1,
+      newLines: 0,
+      content: patchText
     };
-
-    store.stagePatch(patch);
-    return { success: true, patchId: patch.id, hunks: allHunks };
-  } catch (err: unknown) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    if (!validateHunk(hunk)) {
+      throw new Error(`Proposed patch failed security or structural validation`);
+    }
+    stagedHunks.push(hunk);
   }
+
+  const patchId = `patch-${crypto.randomUUID()}`;
+  const stagedPatch: StagedPatch = {
+    id: patchId,
+    targetFile: target_file,
+    hunks: stagedHunks,
+    summary: summary || 'Proposed patch',
+    createdAt: Date.now()
+  };
+
+  // Stage patch in memory only - NEVER write to disk!
+  patchStore.stagePatch(stagedPatch);
+
+  const hunkIds = stagedHunks.map(h => h.id);
+  const resultSummary = `Staged patch ${patchId} for ${target_file} (${stagedHunks.length} hunks). Changes held in-memory for review.`;
+
+  return {
+    patch_id: patchId,
+    target_file,
+    hunk_ids: hunkIds,
+    hunks_count: stagedHunks.length,
+    summary: stagedPatch.summary,
+    rawText: sanitizeToolOutput(resultSummary)
+  };
 }
