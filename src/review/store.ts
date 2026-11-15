@@ -1,55 +1,46 @@
-import { Hunk, HunkDecision, Patch } from '../shared/types';
+import { Hunk, Patch } from '../shared/types';
 
-export interface StoredPatch extends Patch {
-  versionAtProposal?: number;
-  inverseHunks?: Hunk[];
-  status: 'pending' | 'partially_accepted' | 'accepted' | 'rejected' | 'cancelled';
+export interface StagedHunk extends Hunk {
+  applied?: boolean;
+  approved?: boolean;
+}
+
+export interface StagedPatch extends Patch {
+  hunks: StagedHunk[];
+  initialContent?: string;
+  targetVersion?: number;
 }
 
 export class PatchStore {
-  private patches = new Map<string, StoredPatch>();
-  private hunkDecisions = new Map<string, HunkDecision>();
+  private patches = new Map<string, StagedPatch>();
 
-  public stagePatch(patch: Patch, versionAtProposal?: number): StoredPatch {
-    const stored: StoredPatch = {
-      ...patch,
-      versionAtProposal,
-      status: 'pending'
-    };
-    this.patches.set(patch.id, stored);
-    return stored;
+  public stagePatch(patch: StagedPatch): void {
+    this.patches.set(patch.id, patch);
   }
 
-  public getPatch(patchId: string): StoredPatch | undefined {
+  public getPatch(patchId: string): StagedPatch | undefined {
     return this.patches.get(patchId);
   }
 
-  public getAllPatches(): StoredPatch[] {
-    return Array.from(this.patches.values());
-  }
-
-  public findHunk(hunkId: string): { patch: StoredPatch; hunk: Hunk } | undefined {
-    for (const patch of this.patches.values()) {
-      const hunk = patch.hunks.find(h => h.id === hunkId);
-      if (hunk) {
-        return { patch, hunk };
-      }
+  public getHunk(patchId: string, hunkId: string): { patch: StagedPatch; hunk: StagedHunk } | undefined {
+    const patch = this.patches.get(patchId);
+    if (!patch) {
+      return undefined;
     }
-    return undefined;
+    const hunk = patch.hunks.find(h => h.id === hunkId);
+    if (!hunk) {
+      return undefined;
+    }
+    return { patch, hunk };
   }
 
-  public recordDecision(decision: HunkDecision): void {
-    this.hunkDecisions.set(decision.hunkId, decision);
-  }
-
-  public getDecision(hunkId: string): HunkDecision | undefined {
-    return this.hunkDecisions.get(hunkId);
+  public getAllPatches(): StagedPatch[] {
+    return Array.from(this.patches.values());
   }
 
   public clear(): void {
     this.patches.clear();
-    this.hunkDecisions.clear();
   }
 }
 
-export const globalPatchStore = new PatchStore();
+export const defaultPatchStore = new PatchStore();
