@@ -55,6 +55,16 @@
         "forge.trueforgeUrl": {
           "type": "string",
           "default": "http://localhost:8790"
+        },
+        "forge.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:7b",
+          "description": "TrueForge model identifier (7B-14B coding model or hosted provider)"
+        },
+        "forge.temperature": {
+          "type": "number",
+          "default": 0,
+          "description": "Model sampling temperature (must be 0 for deterministic code generation)"
         }
       }
     }
