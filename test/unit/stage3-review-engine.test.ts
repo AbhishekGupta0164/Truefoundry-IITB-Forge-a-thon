@@ -11,7 +11,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { ReviewManager } from '../../src/review/manager';
 import { UndoManager } from '../../src/review/undo';
@@ -22,7 +21,7 @@ import { ReviewPatch, ReviewHunk } from '../../src/shared/types';
 import { StaleHunkError } from '../../src/shared/errors';
 
 describe('Stage 3: Review Engine and UI Invariants (28 Items)', () => {
-  const testDir = path.resolve(os.tmpdir(), 'stage3-test-tmp');
+  const testDir = path.resolve(process.cwd(), 'test/fixtures/stage3-test-tmp');
   let wsManager: WorkspaceManager;
   let statusBar: ForgeStatusBar;
   let undoManager: UndoManager;

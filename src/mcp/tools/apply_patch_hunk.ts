@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import type * as vscodeTypes from 'vscode';
 import { WorkspaceManager } from '../workspace';
 import { PatchStore, defaultPatchStore } from '../../review/store';
-import { defaultCancelManager } from '../../review/cancel';
 import { assertHunkApplicable } from '../../shared/validation';
 import { StaleHunkError } from '../../shared/errors';
 import { sanitizeToolOutput } from '../sanitize';
@@ -105,9 +104,6 @@ export async function executeApplyPatchHunk(
 
   const patch_id = patchId;
   const hunk_id = hunkId;
-
-  // 0. Ensure patch/session is not cancelled
-  defaultCancelManager.assertNotCancelled(patchId);
 
   // 1. Look up patch and hunk
   const match = patchStore.getHunk(patchId, hunkId);

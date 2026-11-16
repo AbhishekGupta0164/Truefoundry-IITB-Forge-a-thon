@@ -1,76 +1,23 @@
 import { PatchStore, defaultPatchStore } from './store';
-import { defaultSessionStateManager } from '../trueforge/session-state';
-import { SessionCancelledError } from '../shared/errors';
 
 export interface CancelResult {
   cancelledPatches: number;
   abandonedHunks: number;
   appliedHunks: number;
-  message: string;
 }
 
 export class CancelManager {
-  private cancelledPatchIds = new Set<string>();
-  private cancelCallbacks: (() => Promise<void> | void)[] = [];
-
   constructor(private patchStore: PatchStore = defaultPatchStore) {}
 
   /**
-   * Register a cancellation callback (e.g. to call sessions.cancel())
-   */
-  public onCancel(callback: () => Promise<void> | void): void {
-    this.cancelCallbacks.push(callback);
-  }
-
-  /**
-   * Checks if a patch ID belongs to a cancelled session/run.
-   */
-  public isCancelled(patchId?: string): boolean {
-    if (defaultSessionStateManager.isCancelled()) {
-      return true;
-    }
-    if (patchId && this.cancelledPatchIds.has(patchId)) {
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Refuse any future application of a patch ID.
-   */
-  public assertNotCancelled(patchId?: string): void {
-    if (this.isCancelled(patchId)) {
-      throw new SessionCancelledError(
-        `Cannot apply hunk: session/patch ${patchId ?? ''} has been cancelled.`
-      );
-    }
-  }
-
-  /**
    * Discards all unapplied/unapproved staged patches and reports stats.
-   * Tells the user if an approved hunk was already applied.
    */
-  public cancelAll(_sessionId?: string): CancelResult {
-    defaultSessionStateManager.markCancelled();
-
-    // Trigger registered cancellation hooks (e.g. TrueForge SDK sessions.cancel)
-    for (const cb of this.cancelCallbacks) {
-      try {
-        const res = cb();
-        if (res && typeof (res as any).catch === 'function') {
-          (res as any).catch(() => {});
-        }
-      } catch {
-        // Safe fire-and-forget
-      }
-    }
-
+  public cancelAll(): CancelResult {
     let abandonedHunks = 0;
     let appliedHunks = 0;
     const patches = this.patchStore.getAllPatches();
 
     for (const patch of patches) {
-      this.cancelledPatchIds.add(patch.id);
       for (const hunk of patch.hunks) {
         if (hunk.applied) {
           appliedHunks++;
@@ -83,23 +30,11 @@ export class CancelManager {
     const cancelledPatches = patches.length;
     this.patchStore.clear();
 
-    let message: string;
-    if (appliedHunks > 0) {
-      message = `Run cancelled: ${cancelledPatches} patch(es) discarded (${abandonedHunks} unapproved hunks). Note: ${appliedHunks} previously approved hunk(s) were already applied.`;
-    } else {
-      message = `Run cancelled: ${cancelledPatches} patch(es) discarded (${abandonedHunks} unapproved hunks). No files modified.`;
-    }
-
     return {
       cancelledPatches,
       abandonedHunks,
-      appliedHunks,
-      message
+      appliedHunks
     };
-  }
-
-  public reset(): void {
-    this.cancelledPatchIds.clear();
   }
 }
 

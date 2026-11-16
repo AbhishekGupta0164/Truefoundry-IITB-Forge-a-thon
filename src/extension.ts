@@ -9,7 +9,6 @@ import { defaultCodeLensProvider } from './review/codelens';
 import { defaultStatusBar } from './ui/status-bar';
 import { defaultDiffViewManager } from './review/diff-view';
 import { defaultReviewManager } from './review/manager';
-import { defaultTrueForgeClient } from './trueforge/client';
 
 let mcpServerManager: MCPServerManager | null = null;
 
@@ -67,20 +66,17 @@ export async function activate(context: vscode.ExtensionContext) {
     defaultAgentPanel.show();
   });
 
-  // Wire cancellation callback to TrueForge client
-  defaultCancelManager.onCancel(async () => {
-    await defaultTrueForgeClient.cancel();
-  });
-
   // Cancel active run
-  const cancelCmd = vscode.commands.registerCommand('forge.cancel', async () => {
-    const stats = await defaultCancelManager.cancelAll();
+  const cancelCmd = vscode.commands.registerCommand('forge.cancel', () => {
+    const stats = defaultCancelManager.cancelAll();
     if (vscode.window.activeTextEditor) {
       defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
     }
     defaultCodeLensProvider.refresh();
     defaultReviewManager.updateStatusBar();
-    vscode.window.showInformationMessage(stats.message);
+    vscode.window.showInformationMessage(
+      `Forge: Run cancelled (${stats.cancelledPatches} patches discarded)`
+    );
   });
 
   // Undo whole task via inverse edits

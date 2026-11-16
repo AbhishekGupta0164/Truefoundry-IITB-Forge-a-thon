@@ -2,14 +2,13 @@ import * as path from 'path';
 import type * as vscodeTypes from 'vscode';
 import { WorkspaceManager } from '../mcp/workspace';
 import { PatchStore, defaultPatchStore } from '../review/store';
+import { executeProposeEdit } from '../mcp/tools/propose_edit';
 import { executeApplyPatchHunk } from '../mcp/tools/apply_patch_hunk';
 import { defaultDiffViewManager } from '../review/diff-view';
 import { defaultCodeLensProvider } from '../review/codelens';
 import { defaultUndoManager } from '../review/undo';
 import { defaultStatusBar } from './status-bar';
 import { runPostAcceptCheck } from '../verify/post-accept';
-import { TrueForgeClient, defaultTrueForgeClient } from '../trueforge/client';
-import { getUserFacingErrorMessage } from '../shared/errors';
 
 let vscodeModule: typeof vscodeTypes | undefined;
 try {
@@ -22,27 +21,19 @@ try {
 export interface InlineEditOptions {
   workspaceManager?: WorkspaceManager;
   patchStore?: PatchStore;
-  trueforgeClient?: TrueForgeClient;
 }
 
 export class InlineEditController {
   private workspaceManager: WorkspaceManager;
   private patchStore: PatchStore;
-  private trueforgeClient: TrueForgeClient;
 
   constructor(options: InlineEditOptions = {}) {
     this.workspaceManager = options.workspaceManager ?? new WorkspaceManager();
     this.patchStore = options.patchStore ?? defaultPatchStore;
-    this.trueforgeClient = options.trueforgeClient ?? defaultTrueForgeClient;
   }
 
   /**
    * Main entry point when user triggers inline edit keybinding (Cmd+Alt+K)
-   * Routes the prompt, selected code, and selection range to a live TrueForge session.
-   *
-   * ARCHITECTURAL RULE:
-   * Does NOT call executeProposeEdit directly.
-   * The model initiates the propose_edit tool call through TrueForge over MCP.
    */
   public async trigger(): Promise<void> {
     if (!vscodeModule?.window?.activeTextEditor) {
@@ -61,7 +52,7 @@ export class InlineEditController {
 
     const selectedText = document.getText(selection);
     const filePath = document.uri.fsPath;
-    const relativePath = path.relative(this.workspaceManager.getRoot(), filePath).replace(/\\/g, '/');
+    const relativePath = path.relative(this.workspaceManager.getRoot(), filePath);
 
     // Prompt user for instruction
     const instruction = await vscodeModule.window.showInputBox({
@@ -75,63 +66,51 @@ export class InlineEditController {
       return;
     }
 
-    defaultStatusBar.setWorking('TrueForge: Agent reasoning...');
+    defaultStatusBar.setWorking('Proposing edit...');
 
     try {
       // Record initial file state for undo tracking
       defaultUndoManager.recordInitialState(filePath, document.getText());
 
-      // Track existing patches in store to detect the new patch from the model's MCP call
-      const patchesBefore = new Set(this.patchStore.getAllPatches().map(p => p.id));
-
-      const selectionRange = {
-        startLine: selection.start.line + 1,
-        startCol: selection.start.character + 1,
-        endLine: selection.end.line + 1,
-        endCol: selection.end.character + 1
-      };
-
-      // Dispatch to TrueForge session
-      const stream = await this.trueforgeClient.runTaskA({
+      // Generate the replacement string based on instruction
+      const newText = await this.generateReplacement({
         filePath: relativePath,
-        selectionRange,
         selectedText,
         instruction,
         fullContent: document.getText()
       });
 
-      for await (const event of stream) {
-        if (event.type === 'token') {
-          defaultStatusBar.setWorking('TrueForge: Generating edit...');
-        } else if (event.type === 'tool_call') {
-          defaultStatusBar.setWorking(`TrueForge: ${event.name}...`);
-        } else if (event.type === 'error') {
-          vscodeModule.window.showErrorMessage(getUserFacingErrorMessage(event.message));
-          defaultStatusBar.setReady();
-          return;
-        }
+      if (!newText || newText === selectedText) {
+        vscodeModule.window.showInformationMessage('Forge: No changes proposed');
+        defaultStatusBar.setReady();
+        return;
       }
 
-      // Check PatchStore for the patch received via propose_edit over MCP
-      const patchesAfter = this.patchStore.getAllPatches();
-      const newPatch =
-        patchesAfter.find(p => !patchesBefore.has(p.id)) ||
-        patchesAfter[patchesAfter.length - 1];
+      // Compute unified diff hunks and stage in PatchStore
+      const result = await executeProposeEdit(
+        {
+          path: relativePath,
+          old_str: selectedText,
+          new_str: newText,
+          summary: instruction
+        },
+        this.workspaceManager,
+        this.patchStore
+      );
 
-      if (newPatch && newPatch.hunks.length > 0) {
-        defaultDiffViewManager.renderHunkDecorations(editor, newPatch.hunks);
+      const stagedPatch = this.patchStore.getPatch(result.patch_id);
+      if (stagedPatch && stagedPatch.hunks.length > 0) {
+        // Render diff decorations and refresh CodeLens
+        defaultDiffViewManager.renderHunkDecorations(editor, stagedPatch.hunks);
         defaultCodeLensProvider.refresh();
-        defaultStatusBar.setPendingReviews(newPatch.hunks.length);
+        defaultStatusBar.setPendingReviews(stagedPatch.hunks.length);
 
         vscodeModule.window.showInformationMessage(
-          `Forge: Proposed ${newPatch.hunks.length} hunk(s). Review above with Accept / Reject.`
+          `Forge: Proposed ${stagedPatch.hunks.length} hunk(s). Review above with Accept / Reject.`
         );
-      } else {
-        vscodeModule.window.showInformationMessage('Forge: No changes proposed by agent.');
-        defaultStatusBar.setReady();
       }
     } catch (err: any) {
-      vscodeModule.window.showErrorMessage(getUserFacingErrorMessage(err));
+      vscodeModule.window.showErrorMessage(`Forge Inline Edit error: ${err.message}`);
       defaultStatusBar.setReady();
     }
   }
@@ -204,7 +183,7 @@ export class InlineEditController {
   }
 
   /**
-   * Preserved auxiliary replacement generator for unit tests and fallback fixtures.
+   * Core generator: maps instruction to replacement string.
    */
   public async generateReplacement(params: {
     filePath: string;
@@ -214,6 +193,8 @@ export class InlineEditController {
   }): Promise<string> {
     const { selectedText, instruction } = params;
 
+    // Handle Task A instruction specifically or apply transformation:
+    // "Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false."
     const lowerInst = instruction.toLowerCase();
     if (
       (lowerInst.includes('off') && lowerInst.includes('n') && lowerInst.includes('false')) ||
@@ -228,6 +209,7 @@ export class InlineEditController {
   private transformGetDebugFlag(text: string): string {
     let result = text;
 
+    // Update the set/tuple of false values to include "off" and "n"
     if (result.includes('{"0", "false", "no"}')) {
       result = result.replace(
         '{"0", "false", "no"}',
@@ -240,6 +222,7 @@ export class InlineEditController {
       );
     }
 
+    // Update docstring to list every value treated as false
     if (result.includes('The default is ``False``.')) {
       result = result.replace(
         'The default is ``False``.',

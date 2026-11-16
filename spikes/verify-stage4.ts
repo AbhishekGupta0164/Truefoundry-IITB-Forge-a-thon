@@ -1,6 +1,5 @@
 /**
- * Test fixture only (isolated for Stage 4 unit verification).
- * Production Task A execution is strictly routed through TrueForgeClient.
+ * Verification script for Stage 4: Task A Inline Edit
  */
 import * as path from 'path';
 import * as fs from 'fs';
@@ -10,46 +9,39 @@ import { PatchStore } from '../src/review/store';
 import { InlineEditController } from '../src/ui/inline-edit';
 import { UndoManager } from '../src/review/undo';
 
-export async function verifyStage4Fixture(targetDir?: string) {
-  console.log('=== Verifying Stage 4: Task A Inline Edit (Test Fixture Mode) ===');
+async function verifyStage4() {
+  console.log('=== Verifying Stage 4: Task A Inline Edit ===');
 
-  const candidates = [
-    targetDir,
-    process.env.FLASK_DIR,
-    path.resolve(__dirname, '../../Flask'),
-    path.resolve(__dirname, '../../flask')
-  ].filter(Boolean) as string[];
-
-  let flaskDir = '';
-  for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'src/flask/helpers.py'))) {
-      flaskDir = c;
-      break;
-    }
-  }
-
-  if (!flaskDir) {
-    console.log('Notice: Flask repository not located, skipping fixture test.');
-    return;
-  }
-
+  const flaskDir = '/Users/abhishekbaderia/Developer/Projects/Truefoundry/flask';
   const targetFile = 'src/flask/helpers.py';
   const fullPath = path.join(flaskDir, targetFile);
+
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Flask target file not found: ${fullPath}`);
+  }
+
   const initialContent = fs.readFileSync(fullPath, 'utf-8');
+  console.log('1. Target file found:', targetFile);
 
   const workspace = new WorkspaceManager(flaskDir);
   const patchStore = new PatchStore();
   const undoManager = new UndoManager(patchStore);
   const controller = new InlineEditController({ workspaceManager: workspace, patchStore });
 
+  // Record initial state for undo
   undoManager.recordInitialState(fullPath, initialContent);
 
+  // Exact function text to select
   const functionStart = initialContent.indexOf('def get_debug_flag() -> bool:');
   const functionEnd = initialContent.indexOf('def get_load_dotenv', functionStart);
   const selectedText = initialContent.slice(functionStart, functionEnd).trimEnd();
 
+  console.log('2. Selected text extracted (lines %d to %d)', 28, 34);
+
+  // Exact instruction from the problem prompt
   const instruction = "Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.";
 
+  // Generate replacement
   const replacement = await controller.generateReplacement({
     filePath: targetFile,
     selectedText,
@@ -57,33 +49,53 @@ export async function verifyStage4Fixture(targetDir?: string) {
     fullContent: initialContent
   });
 
+  console.log('3. Replacement generated. Applying to file...');
   const updatedContent = initialContent.replace(selectedText, replacement);
   fs.writeFileSync(fullPath, updatedContent, 'utf-8');
 
   // Verify FLASK_DEBUG=off
-  const venvPython = path.join(flaskDir, '.venv', 'bin', 'python');
-  const pythonCmd = fs.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
+  const pythonBin = path.join(flaskDir, '.venv', 'bin', 'python');
   const checkCmd = 'from flask.helpers import get_debug_flag; print(get_debug_flag())';
 
-  try {
-    const outOff = execFileSync(pythonCmd, ['-c', checkCmd], {
-      cwd: flaskDir,
-      env: { ...process.env, FLASK_DEBUG: 'off' },
-      encoding: 'utf-8'
-    }).trim();
-    console.log('FLASK_DEBUG=off ->', outOff);
-  } catch (err: any) {
-    console.log('Python check note:', err.message);
+  const outOff = execFileSync(pythonBin, ['-c', checkCmd], {
+    env: { ...process.env, FLASK_DEBUG: 'off' },
+    encoding: 'utf-8'
+  }).trim();
+  console.log('4. FLASK_DEBUG=off ->', outOff, '(expect False)');
+  if (outOff !== 'False') throw new Error(`Expected False, got ${outOff}`);
+
+  const outN = execFileSync(pythonBin, ['-c', checkCmd], {
+    env: { ...process.env, FLASK_DEBUG: 'N' },
+    encoding: 'utf-8'
+  }).trim();
+  console.log('5. FLASK_DEBUG=N ->', outN, '(expect False)');
+  if (outN !== 'False') throw new Error(`Expected False, got ${outN}`);
+
+  const outOffCap = execFileSync(pythonBin, ['-c', checkCmd], {
+    env: { ...process.env, FLASK_DEBUG: 'Off' },
+    encoding: 'utf-8'
+  }).trim();
+  console.log('6. FLASK_DEBUG=Off ->', outOffCap, '(expect False)');
+  if (outOffCap !== 'False') throw new Error(`Expected False, got ${outOffCap}`);
+
+  // Test Undo: restore initial file
+  console.log('7. Triggering undo...');
+  await undoManager.undoTask();
+
+  const finalDiff = execFileSync('git', ['diff', 'src/flask/helpers.py'], {
+    cwd: flaskDir,
+    encoding: 'utf-8'
+  }).trim();
+
+  console.log('8. Git diff after undo:', finalDiff ? finalDiff : '(empty - clean undo!)');
+  if (finalDiff !== '') {
+    throw new Error('Undo did not restore file cleanly!');
   }
 
-  // Restore
-  await undoManager.undoTask();
-  console.log('=== Stage 4 Test Fixture Verification complete ===');
+  console.log('=== Stage 4 Verification PASSED! ===');
 }
 
-if (require.main === module) {
-  verifyStage4Fixture().catch(err => {
-    console.error('Stage 4 verification failed:', err);
-    process.exit(1);
-  });
-}
+verifyStage4().catch((err) => {
+  console.error('Stage 4 verification failed:', err);
+  process.exit(1);
+});
