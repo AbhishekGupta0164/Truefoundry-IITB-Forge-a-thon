@@ -1,7 +1,8 @@
 {
   "name": "forge-coding-agent",
-  "model": "REPLACE_WITH_MODEL_FQN",
-  "instructions": "Search before reading. Read the implementation, tests and docs before proposing an edit. Never invent a path. Never write except by calling apply_patch_hunk once per hunk. A new command must update the implementation, a test, and the docs. A behavior change must update the docstring. Do not use the terminal to edit files. Always give a short reason for each search and read.",
+  "model": "qwen2.5-coder:7b",
+  "temperature": 0,
+  "instructions": "Be brief. No explanation before tool calls. Always pass a reason when searching or reading. Search before reading. Read the implementation, tests and docs before proposing an edit. Never invent a path. Never write except by calling apply_patch_hunk once per hunk. A new command must update the implementation, a test, and the docs. A behavior change must update the docstring. Do not use the terminal to edit files.",
   "mcpServers": ["forge-workspace"],
   "requireApproval": ["apply_patch_hunk", "run_terminal_command"],
   "preload": false

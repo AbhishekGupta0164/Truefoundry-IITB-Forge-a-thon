@@ -1,5 +1,6 @@
 /**
- * Verification script for Stage 5: Context Engine and Agent Mode (Task B)
+ * Test fixture only (isolated for Stage 5 unit verification).
+ * Production Task B execution is strictly routed through TrueForgeClient.
  */
 import * as path from 'path';
 import * as fs from 'fs';
@@ -9,13 +10,34 @@ import { parseMentions } from '../src/context/mentions';
 import { RepoMapGenerator } from '../src/context/repo-map';
 import { WorkspaceManager } from '../src/mcp/workspace';
 
-async function verifyStage5() {
-  console.log('=== Verifying Stage 5: Agent Mode & Context Engine (Task B) ===');
+export async function verifyStage5Fixture(targetDir?: string) {
+  console.log('=== Verifying Stage 5: Agent Mode & Context Engine (Test Fixture Mode) ===');
 
-  const flaskDir = '/Users/abhishekbaderia/Developer/Projects/Truefoundry/flask';
-  const pythonBin = path.join(flaskDir, '.venv', 'bin', 'python');
-  const pytestBin = path.join(flaskDir, '.venv', 'bin', 'pytest');
-  const flaskBin = path.join(flaskDir, '.venv', 'bin', 'flask');
+  const candidates = [
+    targetDir,
+    process.env.FLASK_DIR,
+    path.resolve(__dirname, '../../Flask'),
+    path.resolve(__dirname, '../../flask')
+  ].filter(Boolean) as string[];
+
+  let flaskDir = '';
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, 'src/flask/cli.py'))) {
+      flaskDir = c;
+      break;
+    }
+  }
+
+  if (!flaskDir) {
+    console.log('Notice: Flask repository not located, skipping fixture test.');
+    return;
+  }
+
+  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const venvPytest = path.join(flaskDir, '.venv', 'bin', 'pytest');
+  const pytestBin = fs.existsSync(venvPytest) ? venvPytest : 'pytest';
+  const venvFlask = path.join(flaskDir, '.venv', 'bin', 'flask');
+  const flaskBin = fs.existsSync(venvFlask) ? venvFlask : 'flask';
 
   const cliPyPath = path.join(flaskDir, 'src', 'flask', 'cli.py');
   const testCliPath = path.join(flaskDir, 'tests', 'test_cli.py');
@@ -223,7 +245,9 @@ app.config["SITE_NAME"] = "TrueFoundry Demo Site"
   }
 }
 
-verifyStage5().catch((err) => {
-  console.error('Stage 5 verification failed:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  verifyStage5Fixture().catch((err) => {
+    console.error('Stage 5 verification failed:', err);
+    process.exit(1);
+  });
+}
