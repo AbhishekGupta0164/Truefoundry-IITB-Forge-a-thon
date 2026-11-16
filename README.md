@@ -25,7 +25,7 @@ Target workspace for the three organizer tasks: [pallets/flask](https://github.c
 
 Coding agents fail in organizations for reasons that have little to do with model IQ:
 
-1. **Unbounded writes.** A tool loop that `apply`s a full file is hard to review and harder to undo.
+1. **Unbounded writes.** A tool loop that `applys` a full file is hard to review and harder to undo.
 2. **Unbounded context.** Concatenating the repo until the window fills is expensive and often wrong.
 3. **Silent failure.** A dead proxy or bad key hangs the editor, dumps a stack, or half-writes a tree.
 4. **Key sprawl.** Putting provider secrets in the extension is a non-starter.
