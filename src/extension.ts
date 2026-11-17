@@ -80,7 +80,23 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     defaultCodeLensProvider.refresh();
     defaultReviewManager.updateStatusBar();
-    vscode.window.showInformationMessage(stats.message);
+
+    if (stats.appliedHunks > 0) {
+      const selection = await vscode.window.showWarningMessage(
+        `${stats.message} Undo the ${stats.appliedHunks} applied hunk(s) now to guarantee workspace consistency?`,
+        'Undo Applied Hunks',
+        'Keep Applied'
+      );
+      if (selection === 'Undo Applied Hunks') {
+        const undoRes = await defaultUndoManager.undoTask();
+        defaultReviewManager.updateStatusBar();
+        vscode.window.showInformationMessage(
+          `Forge: Consistency restored (${undoRes.revertedFiles.length} file(s) reverted).`
+        );
+      }
+    } else {
+      vscode.window.showInformationMessage(stats.message);
+    }
   });
 
   // Undo whole task via inverse edits

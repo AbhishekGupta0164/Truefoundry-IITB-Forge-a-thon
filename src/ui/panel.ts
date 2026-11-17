@@ -133,7 +133,25 @@ export class AgentPanelProvider {
       case 'cancel_run': {
         const stats = defaultCancelManager.cancelAll();
         this.postMessage({ type: 'run_completed', status: 'cancelled' });
-        vscodeModule?.window?.showInformationMessage(stats.message);
+        
+        if (stats.appliedHunks > 0) {
+          vscodeModule?.window
+            ?.showWarningMessage(
+              `${stats.message} Would you like to undo the ${stats.appliedHunks} applied hunk(s) to restore workspace consistency?`,
+              'Undo Applied Hunks',
+              'Keep Changes'
+            )
+            .then(async (selection) => {
+              if (selection === 'Undo Applied Hunks') {
+                const res = await defaultUndoManager.undoTask();
+                vscodeModule?.window?.showInformationMessage(
+                  `Forge: Applied changes reverted (${res.revertedFiles.length} file(s) restored).`
+                );
+              }
+            });
+        } else {
+          vscodeModule?.window?.showInformationMessage(stats.message);
+        }
         break;
       }
 

@@ -33,7 +33,7 @@ describe('Stage 4: Inline Edit and Review Flow', () => {
 
     const instruction = "Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.";
 
-    const transformed = await inlineController.generateReplacement({
+    const transformed = await inlineController.generateReplacementForTestOnly({
       filePath: 'src/flask/helpers.py',
       selectedText: originalCode,
       instruction,

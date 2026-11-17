@@ -50,7 +50,7 @@ export async function verifyStage4Fixture(targetDir?: string) {
 
   const instruction = "Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.";
 
-  const replacement = await controller.generateReplacement({
+  const replacement = await controller.generateReplacementForTestOnly({
     filePath: targetFile,
     selectedText,
     instruction,

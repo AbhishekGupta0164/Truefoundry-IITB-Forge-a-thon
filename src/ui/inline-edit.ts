@@ -204,9 +204,14 @@ export class InlineEditController {
   }
 
   /**
-   * Preserved auxiliary replacement generator for unit tests and fallback fixtures.
+   * TEST QUARANTINE ONLY:
+   * Deterministic test fixture helper used exclusively by unit test suites (e.g. inline-edit.test.ts)
+   * and offline verification scripts (verify-stage4.ts).
+   *
+   * PRODUCTION INLINE EDIT DOES NOT USE THIS METHOD.
+   * Production inline edits execute through TrueForgeClient.runTaskA over live MCP.
    */
-  public async generateReplacement(params: {
+  public async generateReplacementForTestOnly(params: {
     filePath: string;
     selectedText: string;
     instruction: string;
@@ -219,13 +224,18 @@ export class InlineEditController {
       (lowerInst.includes('off') && lowerInst.includes('n') && lowerInst.includes('false')) ||
       lowerInst.includes('get_debug_flag')
     ) {
-      return this.transformGetDebugFlag(selectedText);
+      return this.transformGetDebugFlagQuarantined(selectedText);
     }
 
     return selectedText;
   }
 
-  private transformGetDebugFlag(text: string): string {
+  /**
+   * @deprecated QUARANTINED FIXTURE
+   * Purely deterministic string rewriter for synthetic regression tests.
+   * Completely decoupled from production agent execution.
+   */
+  private transformGetDebugFlagQuarantined(text: string): string {
     let result = text;
 
     if (result.includes('{"0", "false", "no"}')) {
