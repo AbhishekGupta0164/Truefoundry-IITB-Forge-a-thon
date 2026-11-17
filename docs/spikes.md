@@ -94,3 +94,23 @@ Both `runTaskA` and `runTaskB` call `createSession()` with `preload: false`.
   - `createSession configures compaction when compaction: true is passed`
   - `runTaskB invokes createSession with deferred tool loading`
 - **Live Spike**: `spikes/verify-t4.ts`
+
+
+---
+
+## T8: Fault-Injection Proxy & Resilience Testing (B3, A3 Anchor)
+
+### 1. Goal
+Provide a local fault proxy in front of the model endpoint to simulate real-world failure modes:
+1. `refused`: closed port / connection dropped abruptly
+2. `rate_limit`: HTTP 429 with `Retry-After` header
+3. `auth_error`: HTTP 401 Bad Credentials (fails immediately with 0 retries)
+4. `stall`: hanging connection / request timeout
+5. `stream_drop`: mid-stream SSE socket termination
+6. `malformed_json`: corrupted event payload
+
+### 2. Invariants Enforced
+- **Zero unapproved writes**: `git status --porcelain` remains clean across all failure modes.
+- **Clear human-readable error messages**: No raw stack traces exposed to user or UI.
+- **Bounded retries & backoff**: 3 attempts with exponential backoff on transient errors; zero retries on auth errors.
+- **Verification**: `test/unit/t8-fault-proxy.test.ts` (7 passing tests) & `spikes/verify-t8.ts`.
