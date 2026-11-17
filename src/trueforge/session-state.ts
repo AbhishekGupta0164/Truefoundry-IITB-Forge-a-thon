@@ -14,8 +14,10 @@ export interface ActiveSession {
 
 export class SessionStateManager {
   private session: ActiveSession | null = null;
+  private cancelled = false;
 
   public setSession(sessionId: string, turnId?: string): void {
+    this.cancelled = false;
     this.session = {
       sessionId,
       turnId,
@@ -37,13 +39,14 @@ export class SessionStateManager {
   }
 
   public markCancelled(): void {
+    this.cancelled = true;
     if (this.session) {
       this.session.isCancelled = true;
     }
   }
 
   public isCancelled(): boolean {
-    return this.session ? this.session.isCancelled : false;
+    return this.cancelled || (this.session ? this.session.isCancelled : false);
   }
 
   public recordEvent(eventId?: string, sequence?: number): void {
@@ -71,6 +74,11 @@ export class SessionStateManager {
 
   public clearSession(): void {
     this.session = null;
+    this.cancelled = false;
+  }
+
+  public reset(): void {
+    this.clearSession();
   }
 }
 

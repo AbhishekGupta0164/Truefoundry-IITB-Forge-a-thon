@@ -1,6 +1,7 @@
 import { PatchStore, defaultPatchStore } from './store';
 import { defaultSessionStateManager } from '../trueforge/session-state';
 import { SessionCancelledError } from '../shared/errors';
+import { UndoManager, defaultUndoManager } from './undo';
 
 export interface CancelResult {
   cancelledPatches: number;
@@ -12,8 +13,17 @@ export interface CancelResult {
 export class CancelManager {
   private cancelledPatchIds = new Set<string>();
   private cancelCallbacks: (() => Promise<void> | void)[] = [];
+  private abortController: AbortController = new AbortController();
+  private isCancelledFlag = false;
 
-  constructor(private patchStore: PatchStore = defaultPatchStore) {}
+  constructor(
+    private patchStore: PatchStore = defaultPatchStore,
+    private undoManager: UndoManager = defaultUndoManager
+  ) {}
+
+  public getAbortController(): AbortController {
+    return this.abortController;
+  }
 
   /**
    * Register a cancellation callback (e.g. to call sessions.cancel())
@@ -26,7 +36,7 @@ export class CancelManager {
    * Checks if a patch ID belongs to a cancelled session/run.
    */
   public isCancelled(patchId?: string): boolean {
-    if (defaultSessionStateManager.isCancelled()) {
+    if (this.isCancelledFlag || defaultSessionStateManager.isCancelled()) {
       return true;
     }
     if (patchId && this.cancelledPatchIds.has(patchId)) {
@@ -51,6 +61,9 @@ export class CancelManager {
    * Tells the user if an approved hunk was already applied.
    */
   public cancelAll(_sessionId?: string): CancelResult {
+    this.isCancelledFlag = true;
+    this.abortController.abort();
+    this.abortController = new AbortController();
     defaultSessionStateManager.markCancelled();
 
     // Trigger registered cancellation hooks (e.g. TrueForge SDK sessions.cancel)
@@ -80,6 +93,10 @@ export class CancelManager {
       }
     }
 
+    if (appliedHunks === 0) {
+      appliedHunks = this.undoManager.getInverseEdits().length;
+    }
+
     const cancelledPatches = patches.length;
     this.patchStore.clear();
 
@@ -99,7 +116,9 @@ export class CancelManager {
   }
 
   public reset(): void {
+    this.isCancelledFlag = false;
     this.cancelledPatchIds.clear();
+    this.abortController = new AbortController();
   }
 }
 

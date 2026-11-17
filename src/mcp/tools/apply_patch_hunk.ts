@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import type * as vscodeTypes from 'vscode';
 import { WorkspaceManager } from '../workspace';
 import { PatchStore, defaultPatchStore } from '../../review/store';
-import { defaultCancelManager } from '../../review/cancel';
+import { CancelManager, defaultCancelManager } from '../../review/cancel';
+import { UndoManager, defaultUndoManager } from '../../review/undo';
 import { assertHunkApplicable } from '../../shared/validation';
 import { StaleHunkError } from '../../shared/errors';
 import { sanitizeToolOutput } from '../sanitize';
@@ -41,10 +42,15 @@ export interface ApplyPatchHunkResult {
 export async function executeApplyPatchHunk(
   params: ApplyPatchHunkParams,
   workspaceManager: WorkspaceManager,
-  patchStore: PatchStore = defaultPatchStore
+  patchStore: PatchStore = defaultPatchStore,
+  undoManager: UndoManager = defaultUndoManager,
+  cancelManager: CancelManager = defaultCancelManager
 ): Promise<ApplyPatchHunkResult> {
   const patchId = params.patch_id || params.patchId;
   const hunkId = params.hunk_id || params.hunkId;
+
+  // 0. Ensure patch/session is not cancelled (check immediately before any operation)
+  cancelManager.assertNotCancelled(patchId);
 
   // Direct hunk application if file and content are provided directly
   if (!patchId && params.file && params.content && hunkId) {
@@ -186,6 +192,21 @@ export async function executeApplyPatchHunk(
 
   hunk.applied = true;
   hunk.approved = true;
+
+  // Record inverse edit for whole task undo (T6)
+  undoManager.recordInverseEdit({
+    taskId: (patch as any).taskId || 'current-task',
+    patchId: patch_id,
+    hunkId: hunk_id,
+    file: absPath,
+    oldStart: hunk.oldStart,
+    oldLines: hunk.oldLines,
+    newStart: hunk.newStart,
+    newLines: newLinesFromHunk.length,
+    originalLines: oldLinesFromHunk,
+    replacementLines: newLinesFromHunk,
+    timestamp: Date.now()
+  });
 
   const msg = `Successfully applied hunk ${hunk_id} from patch ${patch_id} to ${patch.targetFile}`;
 

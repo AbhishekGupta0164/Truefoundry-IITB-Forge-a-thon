@@ -38,6 +38,7 @@ export class TrueForgeClient {
   public readonly loopGuard = new LoopGuard();
   public readonly sessionManager: SessionStateManager;
   public readonly reconnector: StreamReconnector;
+  private abortController: AbortController | null = null;
 
   constructor(
     configOverride?: Partial<TrueForgeConfig>,
@@ -170,6 +171,10 @@ export class TrueForgeClient {
     return await this.sendTurn(sessionId, rawRequest, contextSummary);
   }
 
+  public getAbortController(): AbortController | null {
+    return this.abortController;
+  }
+
   /**
    * Stream a turn through TrueForge SDK's SSE endpoint and yield ForgeEvent objects.
    */
@@ -178,6 +183,7 @@ export class TrueForgeClient {
     prompt: string,
     contextSummary?: string
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
+    this.abortController = new AbortController();
     const fullPrompt = contextSummary
       ? `<context>\n${contextSummary}\n</context>\n\n${prompt}`
       : prompt;
@@ -407,6 +413,10 @@ export class TrueForgeClient {
    * Cancel the current session/turn.
    */
   public async cancel(sessionId?: string): Promise<void> {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
     const activeId = sessionId || this.sessionManager.getSession()?.sessionId;
     this.sessionManager.markCancelled();
     this.loopGuard.reset();
