@@ -3,6 +3,10 @@ import { Hunk, Patch } from '../shared/types';
 export interface StagedHunk extends Hunk {
   applied?: boolean;
   approved?: boolean;
+  dependsOn?: string[];
+  riskScore?: 'low' | 'medium' | 'high';
+  badge?: string;
+  defaultRejected?: boolean;
 }
 
 export interface StagedPatch extends Patch {
