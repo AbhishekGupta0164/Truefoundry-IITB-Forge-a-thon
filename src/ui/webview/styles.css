@@ -96,7 +96,67 @@ body {
   color: var(--vscode-button-foreground);
 }
 
-.btn-deny {
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-button-secondaryForeground);
+.context-map {
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--vscode-editor-inactiveSelectionBackground);
+  border-radius: 6px;
+}
+
+.context-graph-flow {
+  background: var(--vscode-textCodeBlock-background);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.flow-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 4px;
+}
+
+.flow-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+
+.flow-node {
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.flow-arrow {
+  color: var(--vscode-symbolIcon-referenceForeground, #007acc);
+  font-weight: bold;
+}
+
+.context-entries-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.context-entries-list li {
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.entry-reason {
+  color: var(--vscode-descriptionForeground);
+  margin-left: 6px;
+}
+
+.btn-undo-all {
+  background: #f85149;
+  color: #fff;
 }

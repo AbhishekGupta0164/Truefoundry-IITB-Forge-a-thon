@@ -16,7 +16,7 @@ When TrueForge reaches a tool marked with `requireApprovalForTools: ["apply_patc
 ```json
 {
   "type": "tool.approval_required",
-  "createdAt": "2026-11-15T16:47:27.857Z",
+  "createdAt": "2026-11-16T15:54:56.772Z",
   "threadId": "thread-main",
   "toolCalls": [
     {

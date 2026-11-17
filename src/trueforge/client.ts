@@ -96,47 +96,60 @@ export class TrueForgeClient {
       'Never read .env or secret files. Respect the retrieved-context budget.'
     ].join('\n');
 
-    return await withRetry(
-      async () => {
-        const sdk = await this.getSdk();
-        const mcpServerSpec: Record<string, any> = {
-          name: 'forge-workspace',
-          preload,
-          requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
-        };
+    const tryCreate = async (modelName: string): Promise<string> => {
+      const sdk = await this.getSdk();
+      const mcpServerSpec: Record<string, any> = {
+        name: 'forge-workspace',
+        preload,
+        requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
+      };
 
-        const agentSpec: Record<string, any> = {
-          model: {
-            name: targetModel,
-            params: {
-              temperature: this.config.temperature
-            }
-          },
-          instructions,
-          mcpServers: [mcpServerSpec]
-        };
-
-        if (options.compaction) {
-          agentSpec.config = {
-            contextManagement: {
-              compaction: {}
-            }
-          };
-        }
-
-        const { data: session } = await sdk.sessions.create({
-          agent: {
-            spec: agentSpec
+      const agentSpec: Record<string, any> = {
+        model: {
+          name: modelName,
+          params: {
+            temperature: this.config.temperature
           }
-        });
+        },
+        instructions,
+        mcpServers: [mcpServerSpec]
+      };
 
-        console.log(`[forge] session created id=${session.id} preload=${preload}`);
-        this.sessionManager.setSession(session.id);
-        this.loopGuard.reset();
-        return session.id;
-      },
-      { targetUrl: this.config.baseUrl }
-    );
+      if (options.compaction) {
+        agentSpec.config = {
+          contextManagement: {
+            compaction: {}
+          }
+        };
+      }
+
+      const { data: session } = await sdk.sessions.create({
+        agent: {
+          spec: agentSpec
+        }
+      });
+
+      console.log(`[forge] session created id=${session.id} model=${modelName} preload=${preload}`);
+      this.sessionManager.setSession(session.id);
+      this.loopGuard.reset();
+      return session.id;
+    };
+
+    try {
+      return await withRetry(
+        () => tryCreate(targetModel),
+        { targetUrl: this.config.baseUrl }
+      );
+    } catch (err) {
+      if (this.config.fallbackModel && this.config.fallbackModel !== targetModel) {
+        console.warn(`[Forge] Primary model '${targetModel}' failed after retries. Failing over to fallback: '${this.config.fallbackModel}'`);
+        return await withRetry(
+          () => tryCreate(this.config.fallbackModel!),
+          { targetUrl: this.config.baseUrl }
+        );
+      }
+      throw err;
+    }
   }
 
   /**
