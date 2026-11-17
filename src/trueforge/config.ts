@@ -47,6 +47,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
     mcpPort,
     timeoutMs,
     model,
+    fallbackModel,
     temperature,
     trueforgeVersion
   };
