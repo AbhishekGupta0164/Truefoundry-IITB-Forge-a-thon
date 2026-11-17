@@ -1,0 +1,17 @@
+.vscode/**
+.vscode-test/**
+.github/**
+eval/**
+spikes/**
+test/**
+src/**
+node_modules/**
+.eslintrc*
+tsconfig.json
+esbuild.mjs
+vitest.config.ts
+**/*.map
+.git/**
+.gitignore
+*.tsbuildinfo
+*.log
