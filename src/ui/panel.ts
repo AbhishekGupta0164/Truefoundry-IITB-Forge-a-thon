@@ -4,6 +4,7 @@ import { TrueForgeClient, defaultTrueForgeClient } from '../trueforge/client';
 import { PatchStore, defaultPatchStore } from '../review/store';
 import { defaultCancelManager } from '../review/cancel';
 import { defaultUndoManager } from '../review/undo';
+import { ContextLedger, defaultContextLedger } from '../context/ledger';
 import { getUserFacingErrorMessage } from '../shared/errors';
 
 let vscodeModule: typeof vscodeTypes | undefined;
@@ -19,12 +20,61 @@ export class AgentPanelProvider {
   private panel?: vscodeTypes.WebviewPanel;
   private messageHandlers: ((msg: WebviewIncomingMessage) => void)[] = [];
   private trueforgeClient: TrueForgeClient;
+  public readonly contextLedger: ContextLedger;
   constructor(
     public readonly extensionUri?: vscodeTypes.Uri,
     trueforgeClient: TrueForgeClient = defaultTrueForgeClient,
-    public readonly patchStore: PatchStore = defaultPatchStore
+    public readonly patchStore: PatchStore = defaultPatchStore,
+    contextLedger: ContextLedger = defaultContextLedger
   ) {
     this.trueforgeClient = trueforgeClient;
+    this.contextLedger = contextLedger;
+
+    this.contextLedger.onContextUpdate((_entry, ledger) => {
+      this.syncContextLedger(ledger);
+    });
+  }
+
+  private isSyncing = false;
+  public syncContextLedger(ledger: ContextLedger = this.contextLedger): void {
+    if (this.isSyncing) {
+      return;
+    }
+    this.isSyncing = true;
+    try {
+      const groups = ledger.getGroups();
+      const budgetMeter = ledger.getBudgetMeter();
+      this.postMessage({
+        type: 'context_update',
+        entries: ledger.getEntries().map((e) => ({
+          id: e.id,
+          type: e.kind === 'read' ? 'file' : e.kind === 'searched' ? 'snippet' : 'rule',
+          uri: e.path,
+          content: e.reason,
+          tokenCount: e.estimatedTokens
+        })),
+        groups: {
+          read: groups.read.map((r) => ({
+            path: r.path,
+            lineRange: r.startLine != null && r.endLine != null ? `L${r.startLine}-${r.endLine}` : undefined,
+            reason: r.reason
+          })),
+          searched: groups.searched.map((s) => ({
+            path: s.path,
+            lineRange: undefined,
+            reason: s.reason
+          })),
+          skipped: groups.skipped.map((sk) => ({
+            path: sk.path,
+            lineRange: undefined,
+            reason: sk.reason
+          }))
+        },
+        budgetMeter
+      });
+    } finally {
+      this.isSyncing = false;
+    }
   }
 
   public show(): void {
@@ -51,6 +101,7 @@ export class AgentPanelProvider {
     );
 
     this.panel.webview.html = this.getHtml(this.panel.webview);
+    this.syncContextLedger();
 
     this.panel.webview.onDidReceiveMessage(async (msg: WebviewIncomingMessage) => {
       // Execute any registered custom handlers
@@ -159,6 +210,10 @@ export class AgentPanelProvider {
         } catch (err: any) {
           this.postMessage({ type: 'error', message: getUserFacingErrorMessage(err) });
         }
+        break;
+
+      case 'request_state':
+        this.syncContextLedger();
         break;
 
       default:

@@ -30,7 +30,7 @@ export function registerAllTools(
     {
       query: z.string().describe('The search query string'),
       glob: z.string().optional().describe('Optional glob pattern filter (e.g. *.ts or src/**/*.py)'),
-      reason: z.string().optional().describe('Reason for performing this search')
+      reason: z.string().describe('Reason for performing this search')
     },
     { readOnlyHint: true },
     async (args) => {
@@ -53,7 +53,8 @@ export function registerAllTools(
     'search_symbols',
     'Find functions, classes, methods, and their signatures and docstrings across workspace files.',
     {
-      query: z.string().describe('Name or fragment of the symbol to find')
+      query: z.string().describe('Name or fragment of the symbol to find'),
+      reason: z.string().describe('Reason for searching symbols')
     },
     { readOnlyHint: true },
     async (args) => {
@@ -79,7 +80,7 @@ export function registerAllTools(
       path: z.string().describe('Workspace-relative path of the file to read'),
       start: z.number().int().positive().optional().describe('1-based starting line number'),
       end: z.number().int().positive().optional().describe('1-based ending line number (max 200 lines total)'),
-      reason: z.string().optional().describe('Reason for reading this file')
+      reason: z.string().describe('Reason for reading this file')
     },
     { readOnlyHint: true },
     async (args) => {
@@ -102,7 +103,8 @@ export function registerAllTools(
     'find_related',
     'Suggest likely related test files and documentation for a workspace file.',
     {
-      path: z.string().describe('Workspace-relative path to find related files for')
+      path: z.string().describe('Workspace-relative path to find related files for'),
+      reason: z.string().describe('Reason for finding related files')
     },
     { readOnlyHint: true },
     async (args) => {

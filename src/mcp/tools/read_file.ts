@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { WorkspaceManager } from '../workspace';
 import { ContextBudgetTracker } from '../../context/budget';
+import { defaultContextLedger } from '../../context/ledger';
 import { sanitizeToolOutput } from '../sanitize';
 import { RETRIEVED_CONTEXT_BUDGET } from '../../shared/constants';
 
@@ -68,8 +69,27 @@ export async function executeReadFile(
   const chunkText = selectedLines.join('\n');
   const tokenCount = Math.ceil(chunkText.length / 4);
 
+  const reason = params.reason || 'inspecting file';
+
+  // Dedup check: key = tool + path + range. A repeat call returns 'already read lines X to Y earlier' and costs 0 budget.
+  const duplicate = defaultContextLedger.checkDuplicate('read_file', relativePath, startLine, endLine);
+  if (duplicate) {
+    const dedupMsg = `already read lines ${startLine} to ${endLine} earlier`;
+    return {
+      filePath: relativePath,
+      startLine,
+      endLine,
+      totalLines,
+      lines: selectedLines,
+      rawText: sanitizeToolOutput(dedupMsg)
+    };
+  }
+
   // Apply context budget accounting (file count, token budget, line limit)
   budgetTracker.recordFileRead(relativePath, requestedLineCount, tokenCount);
+
+  // Record entry in ledger
+  defaultContextLedger.recordRead(relativePath, startLine, endLine, reason, tokenCount);
 
   const formattedLines = selectedLines.map((line, idx) => {
     const lineNum = startLine + idx;
