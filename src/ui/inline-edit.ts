@@ -1,4 +1,3 @@
-import * as path from 'path';
 import type * as vscodeTypes from 'vscode';
 import { WorkspaceManager } from '../mcp/workspace';
 import { PatchStore, defaultPatchStore } from '../review/store';
@@ -41,7 +40,7 @@ export class InlineEditController {
    * Routes the prompt, selected code, and selection range to a live TrueForge session.
    *
    * ARCHITECTURAL RULE:
-   * Does NOT call executeProposeEdit directly.
+   * Does NOT compute edits or replacements directly.
    * The model initiates the propose_edit tool call through TrueForge over MCP.
    */
   public async trigger(): Promise<void> {
@@ -61,7 +60,6 @@ export class InlineEditController {
 
     const selectedText = document.getText(selection);
     const filePath = document.uri.fsPath;
-    const relativePath = path.relative(this.workspaceManager.getRoot(), filePath).replace(/\\/g, '/');
 
     // Prompt user for instruction
     const instruction = await vscodeModule.window.showInputBox({
@@ -93,7 +91,7 @@ export class InlineEditController {
 
       // Dispatch to TrueForge session
       const stream = await this.trueforgeClient.runTaskA({
-        filePath: relativePath,
+        filePath,
         selectionRange,
         selectedText,
         instruction,

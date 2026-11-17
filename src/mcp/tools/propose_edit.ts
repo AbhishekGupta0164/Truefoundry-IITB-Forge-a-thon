@@ -4,12 +4,16 @@ import * as diff from 'diff';
 import { WorkspaceManager } from '../workspace';
 import { PatchStore, defaultPatchStore, StagedHunk, StagedPatch } from '../../review/store';
 import { sanitizeToolOutput } from '../sanitize';
+import { defaultSessionStateManager } from '../../trueforge/session-state';
 
 export interface ProposeEditParams {
   path: string;
   old_str: string;
   new_str: string;
   summary?: string;
+  reason?: string;
+  session_id?: string;
+  sessionId?: string;
 }
 
 export interface ProposeEditResult {
@@ -94,6 +98,13 @@ export async function executeProposeEdit(
 
   // 5. Stage in memory ONLY - never write to disk!
   patchStore.stagePatch(stagedPatch);
+
+  const sessionId =
+    params.session_id ||
+    params.sessionId ||
+    defaultSessionStateManager.getSession()?.sessionId ||
+    'active';
+  console.log(`[forge] patch staged by propose_edit session=${sessionId}`);
 
   const hunkIds = stagedHunks.map(h => h.id);
   const resultText = `Staged edit patch ${patchId} for ${relativePath} (${stagedHunks.length} hunks). Disk remains unchanged.`;

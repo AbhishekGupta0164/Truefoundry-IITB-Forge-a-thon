@@ -9,6 +9,8 @@
  * - Model calls propose_edit over MCP and PatchStore receives that patch.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { InlineEditController } from '../../src/ui/inline-edit';
 import { AgentPanelProvider } from '../../src/ui/panel';
@@ -16,6 +18,7 @@ import { TrueForgeClient } from '../../src/trueforge/client';
 import { PatchStore } from '../../src/review/store';
 import { WorkspaceManager } from '../../src/mcp/workspace';
 import { ForgeEvent } from '../../src/shared/events';
+import { executeProposeEdit } from '../../src/mcp/tools/propose_edit';
 
 describe('Step 1: Routing Task A and Task B through TrueForge', () => {
   let patchStore: PatchStore;
@@ -147,5 +150,72 @@ describe('Step 1: Routing Task A and Task B through TrueForge', () => {
     expect(capturedPrompt).not.toContain('src/flask/cli.py');
     expect(capturedPrompt).not.toContain('tests/test_cli.py');
     expect(capturedPrompt).not.toContain('docs/cli.rst');
+  });
+
+  it('Step 5 Invariant: inline-edit.ts does not import diff or executeProposeEdit or any replacement generator', () => {
+    const inlineEditPath = path.resolve(__dirname, '../../src/ui/inline-edit.ts');
+    const content = fs.readFileSync(inlineEditPath, 'utf-8');
+
+    // Must not import the diff library
+    expect(content).not.toMatch(/import\s+.*from\s+['"]diff['"]/);
+    expect(content).not.toMatch(/require\(['"]diff['"]\)/);
+
+    // Must not import executeProposeEdit or propose_edit
+    expect(content).not.toMatch(/import\s+.*executeProposeEdit/);
+    expect(content).not.toMatch(/import\s+.*from\s+['"].*propose_edit['"]/);
+
+    // Must not contain local canned replacement logic
+    expect(content).not.toContain('generateReplacement');
+    expect(content).not.toContain('transformGetDebugFlag');
+  });
+
+  it('Step 2 Invariant: runTaskA sends the exact prompt template required by the specification', async () => {
+    let sentPrompt = '';
+    const mockClient = new TrueForgeClient();
+    vi.spyOn(mockClient, 'createSession').mockResolvedValue('test-session-123');
+    vi.spyOn(mockClient, 'sendTurn').mockImplementation(async (_sessionId, prompt) => {
+      sentPrompt = prompt;
+      async function* empty() {}
+      return empty() as any;
+    });
+
+    await mockClient.runTaskA({
+      filePath: 'src/flask/helpers.py',
+      selectionRange: { startLine: 28, startCol: 1, endLine: 35, endCol: 1 },
+      selectedText: 'def get_debug_flag(): ...',
+      instruction: "Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false."
+    });
+
+    const expectedPrompt =
+      "Edit only lines 28-35 of src/flask/helpers.py. Instruction: Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.";
+
+    expect(sentPrompt).toBe(expectedPrompt);
+  });
+
+  it('Step 4 Invariant: executeProposeEdit logs [forge] patch staged by propose_edit session=<id>', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    // Create a temporary file in mini-repo fixture
+    const fixtureDir = path.resolve(__dirname, '../fixtures/mini-repo');
+    const ws = new WorkspaceManager(fixtureDir);
+    const store = new PatchStore();
+
+    await executeProposeEdit(
+      {
+        path: 'app.py',
+        old_str: 'tax_rate=0.05',
+        new_str: 'tax_rate=0.07',
+        session_id: 'sess-test-456'
+      },
+      ws,
+      store
+    );
+
+    const matchLog = consoleSpy.mock.calls.some(call =>
+      call[0]?.includes('[forge] patch staged by propose_edit session=sess-test-456')
+    );
+    expect(matchLog).toBe(true);
+
+    consoleSpy.mockRestore();
   });
 });

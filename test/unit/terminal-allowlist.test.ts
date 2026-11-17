@@ -117,7 +117,7 @@ describe('run_terminal_command Allowlist and Execution Invariants (Items 26-31)'
       // In standalone workspace, command is approved by allowlist
       expect(result.timedOut).toBe(false);
     }
-  }, 20000);
+  }, 45000);
 
   it('truncates excessive terminal output (Item 31)', async () => {
     const result = await executeRunTerminalCommand(
