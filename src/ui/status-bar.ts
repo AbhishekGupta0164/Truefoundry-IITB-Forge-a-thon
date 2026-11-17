@@ -65,6 +65,35 @@ export class ForgeStatusBar {
     this.statusBarItem.tooltip = 'Forge Agent is working on an instruction';
   }
 
+  // ── T5: Runtime status ──────────────────────────────────────────────────
+
+  /** Spinner while TrueForge is starting up. */
+  public setStarting(): void {
+    if (!this.statusBarItem) return;
+    this.statusBarItem.text = '$(sync~spin) Forge: starting';
+    this.statusBarItem.tooltip = 'TrueForge daemon is starting…';
+    this.statusBarItem.command = undefined;
+    this.statusBarItem.color = undefined;
+  }
+
+  /** Green ready indicator showing the active model. */
+  public setRuntimeReady(model: string): void {
+    if (!this.statusBarItem) return;
+    this.statusBarItem.text = `$(check) Forge: ready (${model})`;
+    this.statusBarItem.tooltip = `TrueForge is running — model: ${model}`;
+    this.statusBarItem.command = 'forge.startAll';
+    this.statusBarItem.color = new (vscodeModule!.ThemeColor)('statusBarItem.prominentForeground');
+  }
+
+  /** Red error indicator — clicking retries Start All. */
+  public setDown(): void {
+    if (!this.statusBarItem) return;
+    this.statusBarItem.text = '$(error) Forge: down, click to start';
+    this.statusBarItem.tooltip = 'TrueForge is not running — click to start';
+    this.statusBarItem.command = 'forge.startAll';
+    this.statusBarItem.color = new (vscodeModule!.ThemeColor)('errorForeground');
+  }
+
   public setPendingReviews(count: number): void {
     if (!this.statusBarItem) return;
     if (count > 0) {
