@@ -86,19 +86,19 @@ export async function startTrueForge(
   url: string,
   version: string
 ): Promise<'ready' | 'migration-error' | 'timeout'> {
-  // 1. Node version guard (≥ 22.14)
+  // 1. Already up?
+  if (await isUp(url)) {
+    out.appendLine('[Forge] TrueForge already running.');
+    return 'ready';
+  }
+
+  // 2. Node version guard (≥ 22.14) before spawning
   const { major, minor } = getNodeMajorMinor();
   if (major < 22 || (major === 22 && minor < 14)) {
     const msg = `Forge requires Node ≥ 22.14 (found v${major}.${minor}). Please upgrade Node.js.`;
     out.appendLine(`[Forge] ${msg}`);
     vscode.window.showErrorMessage(msg);
     return 'timeout';
-  }
-
-  // 2. Already up?
-  if (await isUp(url)) {
-    out.appendLine('[Forge] TrueForge already running.');
-    return 'ready';
   }
 
   // 3. Ollama check (only for ollama/ models)
