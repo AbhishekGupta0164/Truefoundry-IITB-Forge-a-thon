@@ -36,6 +36,18 @@
       {
         "command": "forge.copyMcpConfig",
         "title": "Forge: Copy MCP Connector Settings"
+      },
+      {
+        "command": "forge.startAll",
+        "title": "Forge: Start All"
+      },
+      {
+        "command": "forge.stopAll",
+        "title": "Forge: Stop All"
+      },
+      {
+        "command": "forge.selfTest",
+        "title": "Forge: Self-Test"
       }
     ],
     "keybindings": [
@@ -75,6 +87,16 @@
           "type": "number",
           "default": 0,
           "description": "Model sampling temperature (must be 0 for deterministic code generation)"
+        },
+        "forge.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start TrueForge when the extension activates."
+        },
+        "forge.trueforgeDataDir": {
+          "type": "string",
+          "default": "",
+          "description": "Optional: custom path to TrueForge data directory (leave blank for default ~/.trueforge)."
         }
       }
     }
@@ -86,7 +108,8 @@
     "lint": "eslint src test",
     "test:unit": "vitest run",
     "test:e2e": "vscode-test",
-    "eval": "tsx eval/run.ts"
+    "eval": "tsx eval/run.ts",
+    "start:all": "node scripts/start-all.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.5.0",

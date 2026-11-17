@@ -1,4 +1,3 @@
-import * as path from 'path';
 import type * as vscodeTypes from 'vscode';
 import { WorkspaceManager } from '../mcp/workspace';
 import { PatchStore, defaultPatchStore } from '../review/store';
@@ -41,7 +40,7 @@ export class InlineEditController {
    * Routes the prompt, selected code, and selection range to a live TrueForge session.
    *
    * ARCHITECTURAL RULE:
-   * Does NOT call executeProposeEdit directly.
+   * Does NOT compute edits or replacements directly.
    * The model initiates the propose_edit tool call through TrueForge over MCP.
    */
   public async trigger(): Promise<void> {
@@ -61,7 +60,6 @@ export class InlineEditController {
 
     const selectedText = document.getText(selection);
     const filePath = document.uri.fsPath;
-    const relativePath = path.relative(this.workspaceManager.getRoot(), filePath).replace(/\\/g, '/');
 
     // Prompt user for instruction
     const instruction = await vscodeModule.window.showInputBox({
@@ -93,7 +91,7 @@ export class InlineEditController {
 
       // Dispatch to TrueForge session
       const stream = await this.trueforgeClient.runTaskA({
-        filePath: relativePath,
+        filePath,
         selectionRange,
         selectedText,
         instruction,
@@ -201,63 +199,6 @@ export class InlineEditController {
     const remainingHunks = patch.hunks.filter(h => !h.applied).length;
     defaultStatusBar.setPendingReviews(remainingHunks);
     vscodeModule?.window?.showInformationMessage(`Forge: Rejected hunk ${hunkId.slice(0, 8)}`);
-  }
-
-  /**
-   * TEST QUARANTINE ONLY:
-   * Deterministic test fixture helper used exclusively by unit test suites (e.g. inline-edit.test.ts)
-   * and offline verification scripts (verify-stage4.ts).
-   *
-   * PRODUCTION INLINE EDIT DOES NOT USE THIS METHOD.
-   * Production inline edits execute through TrueForgeClient.runTaskA over live MCP.
-   */
-  public async generateReplacementForTestOnly(params: {
-    filePath: string;
-    selectedText: string;
-    instruction: string;
-    fullContent: string;
-  }): Promise<string> {
-    const { selectedText, instruction } = params;
-
-    const lowerInst = instruction.toLowerCase();
-    if (
-      (lowerInst.includes('off') && lowerInst.includes('n') && lowerInst.includes('false')) ||
-      lowerInst.includes('get_debug_flag')
-    ) {
-      return this.transformGetDebugFlagQuarantined(selectedText);
-    }
-
-    return selectedText;
-  }
-
-  /**
-   * @deprecated QUARANTINED FIXTURE
-   * Purely deterministic string rewriter for synthetic regression tests.
-   * Completely decoupled from production agent execution.
-   */
-  private transformGetDebugFlagQuarantined(text: string): string {
-    let result = text;
-
-    if (result.includes('{"0", "false", "no"}')) {
-      result = result.replace(
-        '{"0", "false", "no"}',
-        '{"0", "false", "no", "off", "n"}'
-      );
-    } else if (result.includes('("0", "false", "no")')) {
-      result = result.replace(
-        '("0", "false", "no")',
-        '("0", "false", "no", "off", "n")'
-      );
-    }
-
-    if (result.includes('The default is ``False``.')) {
-      result = result.replace(
-        'The default is ``False``.',
-        'The default is ``False``.\n    Values treated as false are: "0", "false", "no", "off", and "n" (case-insensitive).'
-      );
-    }
-
-    return result;
   }
 }
 

@@ -2,9 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WorkspaceManager } from '../workspace';
 import { sanitizeToolOutput } from '../sanitize';
+import { defaultContextLedger } from '../../context/ledger';
 
 export interface FindRelatedParams {
   path: string;
+  reason?: string;
 }
 
 export interface RelatedItem {
@@ -24,8 +26,19 @@ export async function executeFindRelated(
   workspaceManager: WorkspaceManager
 ): Promise<FindRelatedResult> {
   const { path: targetPath } = params;
+  const reason = params.reason || 'finding related files';
   if (!targetPath || typeof targetPath !== 'string') {
     throw new Error('Path must be a non-empty string');
+  }
+
+  // Dedup check: repeat call returns 'already executed earlier' and costs 0 budget
+  const duplicate = defaultContextLedger.checkDuplicate('find_related', targetPath);
+  if (duplicate) {
+    return {
+      targetPath,
+      related: [],
+      rawText: sanitizeToolOutput(`already found related files for "${targetPath}" earlier`)
+    };
   }
 
   // Validate workspace safety
@@ -112,6 +125,10 @@ export async function executeFindRelated(
         // ignore read errors
       }
     }
+  }
+
+  for (const s of suggestions) {
+    defaultContextLedger.recordSearched(s.path, s.reason || reason, 'find_related');
   }
 
   // Format response

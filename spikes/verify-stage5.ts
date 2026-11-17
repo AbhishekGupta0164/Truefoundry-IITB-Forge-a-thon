@@ -1,260 +1,216 @@
 /**
- * Test fixture only (isolated for Stage 5 unit verification).
- * Production Task B execution is strictly routed through TrueForgeClient.
+ * spikes/verify-stage5.ts
+ *
+ * Task B Verification — Step 3 (Task T1)
+ *
+ * 1. Checks GET http://localhost:8790 first; exits with code 1 and a clear message if down.
+ * 2. Starts a real session through TrueForgeClient.
+ * 3. Auto-approves hunks through the real approval path (ReviewManager / apply_patch_hunk).
+ * 4. Runs organizer commands inside ../flask and asserts output:
+ *    - git diff --stat lists at least 3 files
+ *    - pytest tests/test_cli.py -q exits with 0
+ *    - flask --help contains 'config'
+ *    - flask --app demo/app config masks SECRET_KEY, API_TOKEN and still shows SITE_NAME
+ * 5. Ends with git -C ../flask checkout -- . && git -C ../flask clean -fd.
  */
-import * as path from 'path';
+
 import * as fs from 'fs';
+import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { ContextMap } from '../src/context/map';
-import { parseMentions } from '../src/context/mentions';
-import { RepoMapGenerator } from '../src/context/repo-map';
+import { TrueForgeClient } from '../src/trueforge/client';
 import { WorkspaceManager } from '../src/mcp/workspace';
+import { PatchStore } from '../src/review/store';
+import { ReviewManager } from '../src/review/manager';
+import { ForgeMcpServer } from '../src/mcp/server';
+import { checkTrueForgeReachable, findFlaskDir } from './verify-stage4';
 
-export async function verifyStage5Fixture(targetDir?: string) {
-  console.log('=== Verifying Stage 5: Agent Mode & Context Engine (Test Fixture Mode) ===');
+const TRUEFORGE_URL = process.env.TRUEFORGE_BASE_URL || 'http://localhost:8790';
+const MCP_PORT = Number(process.env.MCP_PORT || 8765);
 
-  const candidates = [
-    targetDir,
-    process.env.FLASK_DIR,
-    path.resolve(__dirname, '../../Flask'),
-    path.resolve(__dirname, '../../flask')
-  ].filter(Boolean) as string[];
-
-  let flaskDir = '';
-  for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'src/flask/cli.py'))) {
-      flaskDir = c;
-      break;
-    }
-  }
-
-  if (!flaskDir) {
-    console.log('Notice: Flask repository not located, skipping fixture test.');
-    return;
-  }
-
+export function getPytestBin(flaskDir: string): string {
   const venvPytest = process.platform === 'win32'
     ? path.join(flaskDir, '.venv', 'Scripts', 'pytest.exe')
     : path.join(flaskDir, '.venv', 'bin', 'pytest');
-  const pytestBin = fs.existsSync(venvPytest) ? venvPytest : 'pytest';
+  return fs.existsSync(venvPytest) ? venvPytest : 'pytest';
+}
+
+export function getFlaskBin(flaskDir: string): string {
   const venvFlask = process.platform === 'win32'
     ? path.join(flaskDir, '.venv', 'Scripts', 'flask.exe')
     : path.join(flaskDir, '.venv', 'bin', 'flask');
-  const flaskBin = fs.existsSync(venvFlask) ? venvFlask : 'flask';
-  const venvPython = process.platform === 'win32'
-    ? path.join(flaskDir, '.venv', 'Scripts', 'python.exe')
-    : path.join(flaskDir, '.venv', 'bin', 'python');
-  const pythonCmd = fs.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
+  return fs.existsSync(venvFlask) ? venvFlask : 'flask';
+}
 
-  const cliPyPath = path.join(flaskDir, 'src', 'flask', 'cli.py');
-  const testCliPath = path.join(flaskDir, 'tests', 'test_cli.py');
-  const docsCliPath = path.join(flaskDir, 'docs', 'cli.rst');
+export async function verifyStage5(targetDir?: string) {
+  console.log('=== Stage 5: Task B Agent Mode Verification ===\n');
 
-  // Verify files exist
-  for (const f of [cliPyPath, testCliPath, docsCliPath]) {
-    if (!fs.existsSync(f)) throw new Error(`Missing expected file: ${f}`);
+  // (a) Check TrueForge reachability first
+  const isUp = await checkTrueForgeReachable(TRUEFORGE_URL);
+  if (!isUp) {
+    console.error(`TrueForge unreachable at ${TRUEFORGE_URL}. Start TrueForge with scripts/start-trueforge.sh or scripts/start-trueforge.js.`);
+    process.exit(1);
   }
+  console.log(`✓ TrueForge reachable at ${TRUEFORGE_URL}`);
 
-  // Backup original contents for full rollback
-  const origCliPy = fs.readFileSync(cliPyPath, 'utf-8');
-  const origTestCli = fs.readFileSync(testCliPath, 'utf-8');
-  const origDocsCli = fs.readFileSync(docsCliPath, 'utf-8');
+  const flaskDir = findFlaskDir(targetDir);
+  console.log(`✓ Target Flask repository: ${flaskDir}`);
 
-  // 1. Context Map tracking & Mentions
-  const contextMap = new ContextMap();
-  const userInstruction = 'Add a new built-in CLI command flask config that prints the loaded application\'s configuration as JSON, masking the values of any key containing SECRET, PASSWORD, TOKEN or KEY as "***". It must appear in flask --help, be covered by a test, and be documented alongside the other built-in commands.';
+  // Initialize workspace, patch store, and review manager
+  const workspaceManager = new WorkspaceManager(flaskDir);
+  const patchStore = new PatchStore();
+  const reviewManager = new ReviewManager(workspaceManager);
 
-  console.log('1. User Instruction:', userInstruction);
-  const mentions = parseMentions(userInstruction);
-  console.log('   Mentions parsed: files = %d, symbols = %d', mentions.files.length, mentions.symbols.length);
-
-  // Record real search & reads into ContextMap
-  contextMap.recordRead({
-    path: 'src/flask/cli.py',
-    lineStart: 580,
-    lineEnd: 605,
-    reason: 'Locate built-in CLI command registration list in FlaskGroup'
-  });
-  contextMap.recordRead({
-    path: 'tests/test_cli.py',
-    lineStart: 460,
-    lineEnd: 520,
-    reason: 'Inspect CLI testing conventions'
-  });
-  contextMap.recordRead({
-    path: 'docs/cli.rst',
-    lineStart: 60,
-    lineEnd: 150,
-    reason: 'Find section documenting built-in commands'
-  });
-  contextMap.recordSkipped('src/flask/blueprints.py', 'Not relevant to CLI commands');
-
-  console.log('\n2. Generated Context Map:');
-  console.log(contextMap.getSummary());
-
-  // 2. Apply modifications to Flask codebase
-  // A. Modify src/flask/cli.py:
-  // Add self.add_command(config_command) and config_command definition
-  let newCliPy = origCliPy;
-
-  // Add self.add_command(config_command) after self.add_command(routes_command)
-  newCliPy = newCliPy.replace(
-    'self.add_command(routes_command)',
-    'self.add_command(routes_command)\n            self.add_command(config_command)'
-  );
-
-  // Add config_command implementation
-  const configCommandDef = `
-@click.command("config", short_help="Show configuration values.")
-@with_appcontext
-def config_command() -> None:
-    """Show the loaded application's configuration as JSON, masking secret values."""
-    import json
-
-    masked: dict[str, t.Any] = {}
-    sensitive_substrings = ("SECRET", "PASSWORD", "TOKEN", "KEY")
-
-    for key, value in current_app.config.items():
-        if any(sub in key for sub in sensitive_substrings):
-            masked[key] = "***"
-        else:
-            try:
-                json.dumps(value)
-                masked[key] = value
-            except (TypeError, ValueError):
-                masked[key] = str(value)
-
-    click.echo(json.dumps(masked, indent=2))
-`;
-
-  newCliPy = newCliPy.replace(
-    'cli = FlaskGroup(',
-    `${configCommandDef}\n\ncli = FlaskGroup(`
-  );
-
-  fs.writeFileSync(cliPyPath, newCliPy, 'utf-8');
-
-  // B. Modify tests/test_cli.py:
-  // Add test_config_command
-  const testConfigDef = `
-def test_config_command(app, runner):
-    app.config["SECRET_KEY"] = "super-secret"
-    app.config["API_TOKEN"] = "token123"
-    app.config["DB_PASSWORD"] = "pass456"
-    app.config["SITE_NAME"] = "MySite"
-
-    cli = FlaskGroup(create_app=lambda: app)
-    result = runner.invoke(cli, ["config"])
-    assert result.exit_code == 0
-    import json
-    data = json.loads(result.output)
-    assert data["SECRET_KEY"] == "***"
-    assert data["API_TOKEN"] == "***"
-    assert data["DB_PASSWORD"] == "***"
-    assert data["SITE_NAME"] == "MySite"
-`;
-  const newTestCli = origTestCli + '\n' + testConfigDef;
-  fs.writeFileSync(testCliPath, newTestCli, 'utf-8');
-
-  // C. Modify docs/cli.rst:
-  // Add Show Application Configuration documentation
-  const docsAddition = [
-    '',
-    'Show Application Configuration',
-    '------------------------------',
-    '',
-    'To inspect the loaded application\'s configuration values, run the ``config``',
-    'command::',
-    '',
-    '    $ flask --app hello config',
-    '',
-    'The configuration is printed as JSON. Sensitive configuration keys (any key',
-    'containing ``SECRET``, ``PASSWORD``, ``TOKEN``, or ``KEY``) have their values',
-    'masked as ``"***"``.',
-    ''
-  ].join('\n');
-  const newDocsCli = origDocsCli + '\n' + docsAddition;
-  fs.writeFileSync(docsCliPath, newDocsCli, 'utf-8');
-
+  // Ensure MCP server is active on port 8765
+  let mcpServer: ForgeMcpServer | null = null;
   try {
-    // 3. Check git diff --stat shows at least 3 files
-    const diffStat = execFileSync('git', ['diff', '--stat'], {
-      cwd: flaskDir,
-      encoding: 'utf-8'
-    }).trim();
-    console.log('\n3. git diff --stat:\n' + diffStat);
-    const changedFilesCount = (diffStat.match(/\.py|\.rst/g) || []).length;
-    if (changedFilesCount < 3) {
-      throw new Error(`Expected at least 3 changed files, got ${changedFilesCount}`);
+    mcpServer = new ForgeMcpServer({
+      port: MCP_PORT,
+      workspaceManager,
+      patchStore
+    });
+    await mcpServer.start();
+    console.log(`✓ MCP Server listening on port ${MCP_PORT}`);
+  } catch (err: any) {
+    console.log(`Note: MCP server already active on port ${MCP_PORT} (${err.message})`);
+  }
+
+  // (b) Start a real session through TrueForgeClient
+  const client = new TrueForgeClient({ baseUrl: TRUEFORGE_URL });
+  const rawInstruction =
+    "Add a new built-in CLI command flask config that prints the loaded application's configuration as JSON, masking the values of any key containing SECRET, PASSWORD, TOKEN or KEY as '***'. It must appear in flask --help, be covered by a test, and be documented alongside the other built-in commands.";
+
+  console.log('\nStarting real TrueForge turn for Task B...');
+  const stream = await client.runTaskB(rawInstruction);
+
+  // Consume turn stream and auto-approve any staged hunks
+  for await (const event of stream) {
+    if (event.type === 'token') {
+      process.stdout.write(event.text);
+    } else if (event.type === 'tool_call') {
+      console.log(`\n[Tool Call] ${event.name}`);
+    } else if (event.type === 'approval') {
+      console.log(`\n[Approval Event] Approving call ${event.requestId}...`);
+    } else if (event.type === 'error') {
+      throw new Error(`Turn error: ${event.message}`);
     }
 
-    // 4. Run pytest tests/test_cli.py -q
-    console.log('\n4. Running pytest tests/test_cli.py -q...');
-    const pytestOut = execFileSync(pytestBin, ['tests/test_cli.py', '-q'], {
-      cwd: flaskDir,
-      encoding: 'utf-8'
-    });
-    console.log('   Pytest output:', pytestOut.trim().split('\n').pop());
-    if (!pytestOut.includes('passed')) {
-      throw new Error('Pytest failed!');
-    }
-
-    // 5. Check flask --help | grep config
-    console.log('\n5. Checking flask --help for config...');
-    const helpOut = execFileSync(flaskBin, ['--help'], {
-      cwd: flaskDir,
-      encoding: 'utf-8'
-    });
-    if (!helpOut.includes('config')) {
-      throw new Error('flask --help does not list config command!');
-    }
-    console.log('   flask --help lists "config" command ✅');
-
-    // 6. Create demo/app.py with SECRET_KEY and API_TOKEN plus SITE_NAME
-    console.log('\n6. Testing demo/app.py with secret masking...');
-    const demoDir = path.join(flaskDir, 'demo');
-    if (!fs.existsSync(demoDir)) fs.mkdirSync(demoDir);
-    const demoAppPath = path.join(demoDir, 'app.py');
-    const demoAppCode = `
-from flask import Flask
-app = Flask(__name__)
-app.config["SECRET_KEY"] = "my-secret-key-123"
-app.config["API_TOKEN"] = "my-api-token-456"
-app.config["SITE_NAME"] = "TrueFoundry Demo Site"
-`;
-    fs.writeFileSync(demoAppPath, demoAppCode, 'utf-8');
-
-    const configRun = execFileSync(flaskBin, ['--app', 'demo/app', 'config'], {
-      cwd: flaskDir,
-      encoding: 'utf-8'
-    });
-
-    console.log('   flask --app demo/app config output:\n' + configRun.trim());
-    const parsedConfig = JSON.parse(configRun);
-    if (parsedConfig.SECRET_KEY !== '***') throw new Error(`SECRET_KEY was not masked: ${parsedConfig.SECRET_KEY}`);
-    if (parsedConfig.API_TOKEN !== '***') throw new Error(`API_TOKEN was not masked: ${parsedConfig.API_TOKEN}`);
-    if (parsedConfig.SITE_NAME !== 'TrueFoundry Demo Site') throw new Error(`SITE_NAME is incorrect: ${parsedConfig.SITE_NAME}`);
-    console.log('   Masking verification PASSED: secret values masked as "***", SITE_NAME preserved! ✅');
-
-    console.log('\n=== Stage 5 Verification PASSED! ===');
-  } finally {
-    // Clean up demo/app.py and restore original files in Flask
-    console.log('\nCleaning up Flask working tree...');
-    fs.writeFileSync(cliPyPath, origCliPy, 'utf-8');
-    fs.writeFileSync(testCliPath, origTestCli, 'utf-8');
-    fs.writeFileSync(docsCliPath, origDocsCli, 'utf-8');
-    const demoAppPath = path.join(flaskDir, 'demo', 'app.py');
-    if (fs.existsSync(demoAppPath)) fs.unlinkSync(demoAppPath);
-    const demoDir = path.join(flaskDir, 'demo');
-    if (fs.existsSync(demoDir)) {
-      try { fs.rmdirSync(demoDir); } catch {}
+    // (c) Auto-approve hunks through the real approval path
+    for (const patch of patchStore.getAllPatches()) {
+      for (const hunk of patch.hunks) {
+        if (!hunk.applied) {
+          console.log(`\n[Approval] Applying hunk ${hunk.id} for ${hunk.file}...`);
+          try {
+            await reviewManager.acceptHunk(patch.id, hunk.id);
+          } catch (approveErr: any) {
+            console.log(`Note on acceptHunk: ${approveErr.message}`);
+          }
+        }
+      }
     }
   }
+
+  // Final approval pass for any remaining hunks
+  for (const patch of patchStore.getAllPatches()) {
+    for (const hunk of patch.hunks) {
+      if (!hunk.applied) {
+        try {
+          await reviewManager.acceptHunk(patch.id, hunk.id);
+        } catch {}
+      }
+    }
+  }
+
+  console.log('\n\n--- Running Task B Assertions on Flask ---');
+
+  // (d.1) git diff --stat lists at least 3 files
+  const diffStat = execFileSync('git', ['-C', flaskDir, 'diff', '--stat'], { encoding: 'utf-8' });
+  console.log('git diff --stat:\n' + diffStat);
+  const changedFiles = diffStat
+    .split('\n')
+    .map(l => l.trim().split('|')[0]?.trim())
+    .filter(Boolean)
+    .filter(f => !f.includes('file changed') && !f.includes('files changed'));
+
+  console.log(`Detected changed files: ${changedFiles.join(', ')}`);
+  if (changedFiles.length < 3) {
+    throw new Error(`Task B requires at least 3 changed files (code, tests, docs). Found: ${changedFiles.length}`);
+  }
+  console.log('✓ git diff --stat shows at least 3 files');
+
+  // (d.2) pytest tests/test_cli.py -q exits 0
+  const pytestBin = getPytestBin(flaskDir);
+  console.log(`\nRunning ${pytestBin} tests/test_cli.py -q...`);
+  const pytestOutput = execFileSync(pytestBin, ['tests/test_cli.py', '-q'], {
+    cwd: flaskDir,
+    encoding: 'utf-8'
+  });
+  console.log('Pytest output:\n' + pytestOutput);
+  console.log('✓ pytest tests/test_cli.py -q exited 0');
+
+  // (d.3) flask --help contains config
+  const flaskBin = getFlaskBin(flaskDir);
+  const helpOutput = execFileSync(flaskBin, ['--help'], {
+    cwd: flaskDir,
+    encoding: 'utf-8'
+  });
+  if (!helpOutput.includes('config')) {
+    throw new Error("flask --help does not list the new 'config' command");
+  }
+  console.log("✓ flask --help contains 'config'");
+
+  // (d.4) flask --app demo/app config masks SECRET_KEY, API_TOKEN and still shows SITE_NAME
+  const demoDir = path.join(flaskDir, 'demo');
+  const demoAppPath = path.join(demoDir, 'app.py');
+  if (!fs.existsSync(demoDir)) fs.mkdirSync(demoDir, { recursive: true });
+
+  fs.writeFileSync(
+    demoAppPath,
+    [
+      'from flask import Flask',
+      'app = Flask(__name__)',
+      'app.config["SECRET_KEY"] = "super-secret-key-12345"',
+      'app.config["API_TOKEN"] = "sensitive-api-token-abc"',
+      'app.config["SITE_NAME"] = "TrueFoundry Demo Site"',
+      'if __name__ == "__main__":',
+      '    app.run()'
+    ].join('\n'),
+    'utf-8'
+  );
+
+  console.log('\nRunning flask --app demo/app config...');
+  const configOutput = execFileSync(flaskBin, ['--app', 'demo/app', 'config'], {
+    cwd: flaskDir,
+    encoding: 'utf-8'
+  });
+  console.log('Config output:\n' + configOutput);
+
+  if (configOutput.includes('super-secret-key-12345') || configOutput.includes('sensitive-api-token-abc')) {
+    throw new Error('Secret masking failed: raw secret value appeared in JSON output!');
+  }
+  if (!configOutput.includes('***')) {
+    throw new Error("Secret masking failed: expected '***' for masked keys!");
+  }
+  if (!configOutput.includes('TrueFoundry Demo Site')) {
+    throw new Error('Normal config key SITE_NAME was missing from config JSON output!');
+  }
+  console.log('✓ Secret masking verified: secrets masked as "***", SITE_NAME preserved!');
+
+  // (6) Reset Flask tree cleanly
+  console.log('\nCleaning up Flask working tree...');
+  execFileSync('git', ['-C', flaskDir, 'checkout', '--', '.'], { stdio: 'inherit' });
+  execFileSync('git', ['-C', flaskDir, 'clean', '-fd'], { stdio: 'inherit' });
+  console.log('✓ Flask tree restored to pristine commit.');
+
+  if (mcpServer) {
+    await mcpServer.stop().catch(() => {});
+  }
+
+  console.log('\n=== Stage 5 Verification PASSED! ===');
 }
 
 if (require.main === module) {
-  verifyStage5Fixture().catch((err) => {
-    console.error('Stage 5 verification failed:', err);
+  verifyStage5().catch(err => {
+    console.error('Stage 5 verification failed:', err.message);
     process.exit(1);
   });
 }

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WorkspaceManager } from '../workspace';
 import { ContextBudgetTracker } from '../../context/budget';
+import { defaultContextLedger } from '../../context/ledger';
 import { isPathSafe } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
 import { RETRIEVED_CONTEXT_BUDGET } from '../../shared/constants';
@@ -105,9 +106,21 @@ export async function executeSearchText(
   budgetTracker: ContextBudgetTracker
 ): Promise<SearchTextResult> {
   const { query, glob: globFilter } = params;
+  const reason = params.reason || 'searching text';
 
   if (!query || typeof query !== 'string') {
     throw new Error('Search query must be a non-empty string');
+  }
+
+  // Dedup check: repeat call returns 'already executed earlier' and costs 0 budget
+  const duplicate = defaultContextLedger.checkDuplicate('search_text', query);
+  if (duplicate) {
+    return {
+      hits: [],
+      totalHits: 0,
+      truncated: false,
+      rawText: sanitizeToolOutput(`already searched for "${query}" earlier`)
+    };
   }
 
   const root = workspaceManager.getRoot();
@@ -153,6 +166,17 @@ export async function executeSearchText(
   }
 
   budgetTracker.recordSearch(hits.length);
+
+  for (const h of hits) {
+    defaultContextLedger.recordSearched(h.file, reason, 'search_text');
+  }
+  defaultContextLedger.recordEntry({
+    tool: 'search_text',
+    path: query,
+    reason,
+    estimatedTokens: Math.ceil(hits.length * 15),
+    kind: 'searched'
+  });
 
   const formattedHits = hits
     .map(h => `${h.file}:${h.line}: ${h.snippet}`)

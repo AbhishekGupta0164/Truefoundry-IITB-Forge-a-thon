@@ -38,6 +38,7 @@ export class TrueForgeClient {
   public readonly loopGuard = new LoopGuard();
   public readonly sessionManager: SessionStateManager;
   public readonly reconnector: StreamReconnector;
+  private abortController: AbortController | null = null;
 
   constructor(
     configOverride?: Partial<TrueForgeConfig>,
@@ -73,9 +74,15 @@ export class TrueForgeClient {
   /**
    * Create a new agent session on TrueForge.
    * Injects instructions and attaches the MCP server with approval requirements.
+   * By default passes preload: false for deferred tool loading (T4 / B4 anchor).
    */
-  public async createSession(model?: string, instructionsOverride?: string): Promise<string> {
+  public async createSession(
+    model?: string,
+    instructionsOverride?: string,
+    options: { preload?: boolean; compaction?: boolean } = {}
+  ): Promise<string> {
     const targetModel = model ?? this.config.model;
+    const preload = options.preload ?? false;
 
     const instructions = instructionsOverride ?? [
       'You are Forge Agent — an autonomous coding assistant embedded in VS Code.',
@@ -91,28 +98,38 @@ export class TrueForgeClient {
 
     const tryCreate = async (modelName: string): Promise<string> => {
       const sdk = await this.getSdk();
-      const { data: session } = await sdk.sessions.create({
-        preload: false,
-        agent: {
-          spec: {
-            model: {
-              name: modelName,
-              params: {
-                temperature: this.config.temperature
-              }
-            },
-            instructions,
-            mcpServers: [
-              {
-                name: 'forge-workspace',
-                requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
-              }
-            ]
+      const mcpServerSpec: Record<string, any> = {
+        name: 'forge-workspace',
+        preload,
+        requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
+      };
+
+      const agentSpec: Record<string, any> = {
+        model: {
+          name: modelName,
+          params: {
+            temperature: this.config.temperature
           }
+        },
+        instructions,
+        mcpServers: [mcpServerSpec]
+      };
+
+      if (options.compaction) {
+        agentSpec.config = {
+          contextManagement: {
+            compaction: {}
+          }
+        };
+      }
+
+      const { data: session } = await sdk.sessions.create({
+        agent: {
+          spec: agentSpec
         }
       });
 
-      console.log(`[Forge] Session created: id=${session.id}, model=${modelName}, preload=false (compaction active)`);
+      console.log(`[forge] session created id=${session.id} model=${modelName} preload=${preload}`);
       this.sessionManager.setSession(session.id);
       this.loopGuard.reset();
       return session.id;
@@ -127,7 +144,7 @@ export class TrueForgeClient {
       if (this.config.fallbackModel && this.config.fallbackModel !== targetModel) {
         console.warn(`[Forge] Primary model '${targetModel}' failed after retries. Failing over to fallback: '${this.config.fallbackModel}'`);
         return await withRetry(
-          () => tryCreate(this.config.fallbackModel),
+          () => tryCreate(this.config.fallbackModel!),
           { targetUrl: this.config.baseUrl }
         );
       }
@@ -144,20 +161,12 @@ export class TrueForgeClient {
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const sessionId = await this.createSession();
 
-    const prompt = [
-      `Modify the file: ${params.filePath}`,
-      `Selected lines ${params.selectionRange.startLine}-${params.selectionRange.endLine}:`,
-      '```',
-      params.selectedText,
-      '```',
-      `Instruction: ${params.instruction}`,
-      '',
-      'Inspect the code if needed using read_file, and propose an edit for this exact selection by calling the propose_edit tool with:',
-      `- path: "${params.filePath}"`,
-      `- old_str: "${params.selectedText.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
-      `- new_str: <your updated code>`,
-      `- summary: "${params.instruction}"`
-    ].join('\n');
+    const start = params.selectionRange.startLine;
+    const end = params.selectionRange.endLine;
+    const filePath = params.filePath;
+    const instruction = params.instruction;
+
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.`;
 
     return await this.sendTurn(sessionId, prompt);
   }
@@ -168,10 +177,15 @@ export class TrueForgeClient {
    */
   public async runTaskB(
     rawRequest: string,
-    contextSummary?: string
+    contextSummary?: string,
+    options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    const sessionId = await this.createSession();
+    const sessionId = await this.createSession(undefined, undefined, options);
     return await this.sendTurn(sessionId, rawRequest, contextSummary);
+  }
+
+  public getAbortController(): AbortController | null {
+    return this.abortController;
   }
 
   /**
@@ -182,6 +196,7 @@ export class TrueForgeClient {
     prompt: string,
     contextSummary?: string
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
+    this.abortController = new AbortController();
     const fullPrompt = contextSummary
       ? `<context>\n${contextSummary}\n</context>\n\n${prompt}`
       : prompt;
@@ -411,6 +426,10 @@ export class TrueForgeClient {
    * Cancel the current session/turn.
    */
   public async cancel(sessionId?: string): Promise<void> {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
     const activeId = sessionId || this.sessionManager.getSession()?.sessionId;
     this.sessionManager.markCancelled();
     this.loopGuard.reset();
