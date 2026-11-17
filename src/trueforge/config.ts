@@ -15,6 +15,7 @@ export interface TrueForgeConfig {
   model: string;
   fallbackModel: string;
   temperature: number;
+  trueforgeVersion: string;
 }
 
 export function getTrueForgeConfig(): TrueForgeConfig {
@@ -24,6 +25,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
   let model = process.env.TRUEFORGE_MODEL || 'qwen2.5-coder:14b';
   let fallbackModel = process.env.TRUEFORGE_FALLBACK_MODEL || 'qwen2.5-coder:7b';
   let temperature = 0;
+  let trueforgeVersion = process.env.TRUEFORGE_VERSION || '0.184.3';
 
   try {
     const config = vscodeModule?.workspace?.getConfiguration?.('forge');
@@ -34,6 +36,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
       model = config.get<string>('model', model);
       fallbackModel = config.get<string>('fallbackModel', fallbackModel);
       temperature = config.get<number>('temperature', temperature);
+      trueforgeVersion = config.get<string>('trueforgeVersion', trueforgeVersion);
     }
   } catch {
     // Ignore outside VS Code
@@ -44,7 +47,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
     mcpPort,
     timeoutMs,
     model,
-    fallbackModel,
-    temperature
+    temperature,
+    trueforgeVersion
   };
 }

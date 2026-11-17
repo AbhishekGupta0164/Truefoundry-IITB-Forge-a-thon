@@ -33,11 +33,18 @@ export async function verifyStage5Fixture(targetDir?: string) {
     return;
   }
 
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-  const venvPytest = path.join(flaskDir, '.venv', 'bin', 'pytest');
+  const venvPytest = process.platform === 'win32'
+    ? path.join(flaskDir, '.venv', 'Scripts', 'pytest.exe')
+    : path.join(flaskDir, '.venv', 'bin', 'pytest');
   const pytestBin = fs.existsSync(venvPytest) ? venvPytest : 'pytest';
-  const venvFlask = path.join(flaskDir, '.venv', 'bin', 'flask');
+  const venvFlask = process.platform === 'win32'
+    ? path.join(flaskDir, '.venv', 'Scripts', 'flask.exe')
+    : path.join(flaskDir, '.venv', 'bin', 'flask');
   const flaskBin = fs.existsSync(venvFlask) ? venvFlask : 'flask';
+  const venvPython = process.platform === 'win32'
+    ? path.join(flaskDir, '.venv', 'Scripts', 'python.exe')
+    : path.join(flaskDir, '.venv', 'bin', 'python');
+  const pythonCmd = fs.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
 
   const cliPyPath = path.join(flaskDir, 'src', 'flask', 'cli.py');
   const testCliPath = path.join(flaskDir, 'tests', 'test_cli.py');

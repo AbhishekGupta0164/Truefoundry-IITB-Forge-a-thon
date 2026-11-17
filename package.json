@@ -56,6 +56,11 @@
           "type": "string",
           "default": "http://localhost:8790"
         },
+        "forge.trueforgeVersion": {
+          "type": "string",
+          "default": "0.184.3",
+          "description": "Pinned TrueForge version used across all teammates and environments"
+        },
         "forge.model": {
           "type": "string",
           "default": "qwen2.5-coder:14b",
