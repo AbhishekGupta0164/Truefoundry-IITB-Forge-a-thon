@@ -129,20 +129,12 @@ export class TrueForgeClient {
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const sessionId = await this.createSession();
 
-    const prompt = [
-      `Modify the file: ${params.filePath}`,
-      `Selected lines ${params.selectionRange.startLine}-${params.selectionRange.endLine}:`,
-      '```',
-      params.selectedText,
-      '```',
-      `Instruction: ${params.instruction}`,
-      '',
-      'Inspect the code if needed using read_file, and propose an edit for this exact selection by calling the propose_edit tool with:',
-      `- path: "${params.filePath}"`,
-      `- old_str: "${params.selectedText.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
-      `- new_str: <your updated code>`,
-      `- summary: "${params.instruction}"`
-    ].join('\n');
+    const start = params.selectionRange.startLine;
+    const end = params.selectionRange.endLine;
+    const filePath = params.filePath;
+    const instruction = params.instruction;
+
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.`;
 
     return await this.sendTurn(sessionId, prompt);
   }
