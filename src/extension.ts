@@ -130,15 +130,35 @@ export async function activate(context: vscode.ExtensionContext) {
     await defaultTrueForgeClient.cancel();
   });
 
-  // Cancel active run
+  // Cancel active run (T6: one-gesture undo, AbortController, panel update)
   const cancelCmd = vscode.commands.registerCommand('forge.cancel', async () => {
-    const stats = await defaultCancelManager.cancelAll();
+    // 1. Immediately abort running tasks, call sessions.cancel, discard unapplied patches
+    const stats = defaultCancelManager.cancelAll();
+
+    // 2. Show 'Cancelled' in panel within one second
+    defaultAgentPanel.postMessage({ type: 'run_completed', status: 'cancelled' });
+
+    // 3. Clear diff view decorations & update status bar
     if (vscode.window.activeTextEditor) {
       defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
     }
     defaultCodeLensProvider.refresh();
+    defaultReviewManager.clear();
     defaultReviewManager.updateStatusBar();
-    vscode.window.showInformationMessage(stats.message);
+
+    // 4. If any hunks were already applied, show notification with Undo/Keep
+    if (stats.appliedHunks > 0) {
+      const choice = await vscode.window.showInformationMessage(
+        `${stats.appliedHunks} hunks were already applied. Undo them?`,
+        'Undo',
+        'Keep'
+      );
+      if (choice === 'Undo') {
+        await vscode.commands.executeCommand('forge.undoTask');
+      }
+    } else {
+      vscode.window.showInformationMessage(stats.message);
+    }
   });
 
   // Undo whole task via inverse edits

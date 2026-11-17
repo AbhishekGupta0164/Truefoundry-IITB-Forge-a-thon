@@ -182,9 +182,13 @@ export class AgentPanelProvider {
         break;
 
       case 'cancel_run': {
-        const stats = defaultCancelManager.cancelAll();
         this.postMessage({ type: 'run_completed', status: 'cancelled' });
-        vscodeModule?.window?.showInformationMessage(stats.message);
+        if (vscodeModule?.commands?.executeCommand) {
+          await vscodeModule.commands.executeCommand('forge.cancel');
+        } else {
+          const stats = defaultCancelManager.cancelAll();
+          vscodeModule?.window?.showInformationMessage(stats.message);
+        }
         break;
       }
 
