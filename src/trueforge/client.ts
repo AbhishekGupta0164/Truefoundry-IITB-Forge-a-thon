@@ -73,9 +73,15 @@ export class TrueForgeClient {
   /**
    * Create a new agent session on TrueForge.
    * Injects instructions and attaches the MCP server with approval requirements.
+   * By default passes preload: false for deferred tool loading (T4 / B4 anchor).
    */
-  public async createSession(model?: string, instructionsOverride?: string): Promise<string> {
+  public async createSession(
+    model?: string,
+    instructionsOverride?: string,
+    options: { preload?: boolean; compaction?: boolean } = {}
+  ): Promise<string> {
     const targetModel = model ?? this.config.model;
+    const preload = options.preload ?? false;
 
     const instructions = instructionsOverride ?? [
       'You are Forge Agent — an autonomous coding assistant embedded in VS Code.',
@@ -92,26 +98,38 @@ export class TrueForgeClient {
     return await withRetry(
       async () => {
         const sdk = await this.getSdk();
+        const mcpServerSpec: Record<string, any> = {
+          name: 'forge-workspace',
+          preload,
+          requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
+        };
+
+        const agentSpec: Record<string, any> = {
+          model: {
+            name: targetModel,
+            params: {
+              temperature: this.config.temperature
+            }
+          },
+          instructions,
+          mcpServers: [mcpServerSpec]
+        };
+
+        if (options.compaction) {
+          agentSpec.config = {
+            contextManagement: {
+              compaction: {}
+            }
+          };
+        }
+
         const { data: session } = await sdk.sessions.create({
           agent: {
-            spec: {
-              model: {
-                name: targetModel,
-                params: {
-                  temperature: this.config.temperature
-                }
-              },
-              instructions,
-              mcpServers: [
-                {
-                  name: 'forge-workspace',
-                  requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
-                }
-              ]
-            }
+            spec: agentSpec
           }
         });
 
+        console.log(`[forge] session created id=${session.id} preload=${preload}`);
         this.sessionManager.setSession(session.id);
         this.loopGuard.reset();
         return session.id;
@@ -145,9 +163,10 @@ export class TrueForgeClient {
    */
   public async runTaskB(
     rawRequest: string,
-    contextSummary?: string
+    contextSummary?: string,
+    options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    const sessionId = await this.createSession();
+    const sessionId = await this.createSession(undefined, undefined, options);
     return await this.sendTurn(sessionId, rawRequest, contextSummary);
   }
 
