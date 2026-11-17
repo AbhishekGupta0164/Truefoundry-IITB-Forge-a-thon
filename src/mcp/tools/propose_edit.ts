@@ -5,18 +5,27 @@ import { WorkspaceManager } from '../workspace';
 import { PatchStore, defaultPatchStore, StagedHunk, StagedPatch } from '../../review/store';
 import { sanitizeToolOutput } from '../sanitize';
 import { defaultSessionStateManager } from '../../trueforge/session-state';
+import { matchAndReplace, repairProposeEditArgs, buildHunkDependencyGraph } from '../../review/matcher';
+import { validatePythonSource } from '../../review/validate';
 
 export interface ProposeEditParams {
-  path: string;
-  old_str: string;
-  new_str: string;
+  path?: string;
+  filePath?: string;
+  old_str?: string;
+  oldStr?: string;
+  new_str?: string;
+  newStr?: string;
   summary?: string;
   reason?: string;
+  diff?: string;
+  full_file?: boolean;
   session_id?: string;
   sessionId?: string;
+  edits?: Array<{ old_str?: string; new_str?: string; oldStr?: string; newStr?: string }>;
 }
 
 export interface ProposeEditResult {
+  ok: boolean;
   patch_id: string;
   hunk_ids: string[];
   hunks_count: number;
@@ -24,6 +33,13 @@ export interface ProposeEditResult {
   summary: string;
   diff: string;
   rawText: string;
+  tier?: number;
+  dependencies?: Record<string, string[]>;
+  error?: {
+    code: string;
+    message: string;
+    hint?: string;
+  };
 }
 
 export async function executeProposeEdit(
@@ -31,40 +47,69 @@ export async function executeProposeEdit(
   workspaceManager: WorkspaceManager,
   patchStore: PatchStore = defaultPatchStore
 ): Promise<ProposeEditResult> {
-  const { path: relativePath, old_str, new_str, summary } = params;
+  // 1. Tool-Call Repair: normalize malformed arguments, aliases, leading slashes
+  const repaired = repairProposeEditArgs(params);
+  const relativePath = repaired.path;
 
   if (!relativePath || typeof relativePath !== 'string') {
     throw new Error('path must be a non-empty string');
   }
-  if (typeof old_str !== 'string') {
-    throw new Error('old_str must be a string');
-  }
-  if (typeof new_str !== 'string') {
-    throw new Error('new_str must be a string');
-  }
 
-  // 1. Resolve safe path
+  // 2. Resolve safe path
   const absPath = workspaceManager.resolveSafePath(relativePath);
-
   if (!fs.existsSync(absPath)) {
     throw new Error(`File does not exist: ${relativePath}`);
   }
 
-  // 2. Read existing file securely
   const currentContent = fs.readFileSync(absPath, 'utf-8');
+  let updatedContent = currentContent;
+  let matchedTier: 1 | 2 | 3 | undefined;
 
-  // 3. Ensure old_str is present and unambiguous
-  if (!currentContent.includes(old_str)) {
-    throw new Error(`old_str not found in ${relativePath}`);
+  // 3. Alternative Input: Unified diff or full-file replacement
+  const isUnifiedDiff = Boolean(
+    repaired.diff ||
+    repaired.old_str.includes('diff --git') ||
+    repaired.old_str.includes('@@ ')
+  );
+
+  if (isUnifiedDiff) {
+    const rawDiff = repaired.diff || repaired.old_str;
+    const parsedDiffs = diff.parsePatch(rawDiff);
+    if (!parsedDiffs || parsedDiffs.length === 0) {
+      throw new Error('Failed to parse unified diff');
+    }
+    const applied = diff.applyPatch(currentContent, parsedDiffs[0]);
+    if (applied === false) {
+      throw new Error('Unified diff failed to apply cleanly to current file content');
+    }
+    updatedContent = applied;
+  } else if (repaired.full_file) {
+    // Full-file replacement mode
+    updatedContent = repaired.new_str;
+  } else {
+    // 4. Three-Tier Matcher
+    const match = matchAndReplace(currentContent, repaired.old_str, repaired.new_str);
+    if (!match.matched) {
+      const err = match.error || { code: 'MATCH_FAILED', message: 'old_str not found' };
+      throw new Error(`old_str not found: ${err.message}`);
+    }
+    matchedTier = match.tier;
+    updatedContent =
+      currentContent.slice(0, match.startIndex) +
+      match.replacementText +
+      currentContent.slice(match.endIndex);
   }
 
-  const occurrences = currentContent.split(old_str).length - 1;
-  if (occurrences > 1) {
-    throw new Error(`old_str is ambiguous: found ${occurrences} occurrences in ${relativePath}`);
+  // 5. In-Memory Validation Pipeline (Syntax check on python files)
+  if (relativePath.endsWith('.py')) {
+    const syntax = validatePythonSource(updatedContent);
+    if (!syntax.valid) {
+      const firstError = syntax.errors[0] || 'Python syntax error in proposed replacement';
+      throw new Error(`[SYNTAX_ERROR] ${firstError}`);
+    }
   }
 
-  // 4. Calculate diff server-side
-  const updatedContent = currentContent.replace(old_str, new_str);
+  // 6. Calculate diff and parse hunks server-side
   const patchString = diff.createPatch(relativePath, currentContent, updatedContent);
   const parsed = diff.parsePatch(patchString);
 
@@ -86,17 +131,26 @@ export async function executeProposeEdit(
     }
   }
 
+  // 7. Hunk Dependency Graph
+  const depMap = buildHunkDependencyGraph(stagedHunks);
+  for (const hunk of stagedHunks) {
+    const deps = depMap.get(hunk.id);
+    if (deps && deps.length > 0) {
+      hunk.dependsOn = deps;
+    }
+  }
+
   const patchId = `patch-${crypto.randomUUID()}`;
   const stagedPatch: StagedPatch = {
     id: patchId,
     targetFile: relativePath,
     hunks: stagedHunks,
-    summary: summary || `Edit in ${relativePath}`,
+    summary: repaired.summary || `Edit in ${relativePath}`,
     createdAt: Date.now(),
     initialContent: currentContent
   };
 
-  // 5. Stage in memory ONLY - never write to disk!
+  // 8. Stage in memory ONLY - never write to disk!
   patchStore.stagePatch(stagedPatch);
 
   const sessionId =
@@ -107,15 +161,23 @@ export async function executeProposeEdit(
   console.log(`[forge] patch staged by propose_edit session=${sessionId}`);
 
   const hunkIds = stagedHunks.map(h => h.id);
-  const resultText = `Staged edit patch ${patchId} for ${relativePath} (${stagedHunks.length} hunks). Disk remains unchanged.`;
+  const resultText = `Staged edit patch ${patchId} for ${relativePath} (${stagedHunks.length} hunks, tier ${matchedTier || 'diff'}). Disk remains unchanged.`;
+
+  const depRecord: Record<string, string[]> = {};
+  for (const [k, v] of depMap.entries()) {
+    depRecord[k] = v;
+  }
 
   return {
+    ok: true,
     patch_id: patchId,
     hunk_ids: hunkIds,
     hunks_count: stagedHunks.length,
     target_file: relativePath,
     summary: stagedPatch.summary,
     diff: patchString,
-    rawText: sanitizeToolOutput(resultText)
+    rawText: sanitizeToolOutput(resultText),
+    tier: matchedTier,
+    dependencies: Object.keys(depRecord).length > 0 ? depRecord : undefined
   };
 }

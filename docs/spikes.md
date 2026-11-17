@@ -114,3 +114,19 @@ Provide a local fault proxy in front of the model endpoint to simulate real-worl
 - **Clear human-readable error messages**: No raw stack traces exposed to user or UI.
 - **Bounded retries & backoff**: 3 attempts with exponential backoff on transient errors; zero retries on auth errors.
 - **Verification**: `test/unit/t8-fault-proxy.test.ts` (7 passing tests) & `spikes/verify-t8.ts`.
+
+
+---
+
+## T9: Edit Robustness, Multi-Tier Matcher & Typed Errors (A1, A2 Anchor)
+
+### 1. Goal
+Provide a resilient edit engine that is forgiving on input (tolerant to model formatting errors) and strict on output:
+1. **Tier 1**: Exact unique match.
+2. **Tier 2**: Whitespace-normalized match (tabs, spaces, CRLF, trailing spaces) with automatic re-indentation of replacements.
+3. **Tier 3**: Anchor match (first and last lines anchored within a sliding window, tolerates drifted middle with >=0.70 similarity).
+4. **Diagnostics on failure**: Returns closest candidate line number, 5-line excerpt, and difference hint (`matched 0 times; closest match at line X, differs at line Y`) or ambiguous line numbers (`ambiguous: matched at lines 12 and 88, add context`).
+5. **Alternative inputs**: Accepts unified diff and full-file replacement formats, converting both into server-side hunks.
+6. **Tool-call repair**: Automatically repairs stringified JSON, alias argument keys, and strips leading slashes in paths.
+7. **In-memory validation pipeline**: Validates Python AST syntax in-memory before staging.
+8. **Hunk dependency graph**: Detects when later hunks rely on symbols/imports introduced in earlier hunks (`dependsOn`).
