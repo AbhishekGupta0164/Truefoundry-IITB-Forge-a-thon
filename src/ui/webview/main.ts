@@ -65,7 +65,7 @@ export class WebviewApp {
         this.timeline.completeToolCall(msg.result.toolCallId, msg.result.success, msg.result.output);
         break;
       case 'context_update':
-        this.contextMap.update(msg.entries);
+        this.contextMap.update(msg.entries, msg.groups, msg.budgetMeter);
         break;
       case 'budget_update':
         this.budgetMeter.update(msg.budget);

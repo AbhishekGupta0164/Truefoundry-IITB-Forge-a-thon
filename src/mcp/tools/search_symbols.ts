@@ -4,9 +4,11 @@ import * as path from 'path';
 import { WorkspaceManager } from '../workspace';
 import { isPathSafe } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
+import { defaultContextLedger } from '../../context/ledger';
 
 export interface SearchSymbolsParams {
   query: string;
+  reason?: string;
 }
 
 export interface SymbolLocation {
@@ -136,8 +138,18 @@ export async function executeSearchSymbols(
   workspaceManager: WorkspaceManager
 ): Promise<{ symbols: SymbolLocation[]; rawText: string }> {
   const { query } = params;
+  const reason = params.reason || 'searching symbols';
   if (!query || typeof query !== 'string') {
     throw new Error('Symbol query must be a non-empty string');
+  }
+
+  // Dedup check: repeat call returns 'already executed earlier' and costs 0 budget
+  const duplicate = defaultContextLedger.checkDuplicate('search_symbols', query);
+  if (duplicate) {
+    return {
+      symbols: [],
+      rawText: sanitizeToolOutput(`already searched symbols for "${query}" earlier`)
+    };
   }
 
   const root = workspaceManager.getRoot();
@@ -259,6 +271,10 @@ export async function executeSearchSymbols(
     }
     return str;
   }).join('\n');
+
+  for (const s of matchedSymbols) {
+    defaultContextLedger.recordSearched(s.file, reason, 'search_symbols');
+  }
 
   const summary = matchedSymbols.length > 0
     ? `Found ${matchedSymbols.length} symbols matching "${query}":\n${formatted}`
