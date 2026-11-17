@@ -5,6 +5,7 @@ import { PatchStore, defaultPatchStore } from '../review/store';
 import { defaultCancelManager } from '../review/cancel';
 import { defaultUndoManager } from '../review/undo';
 import { getUserFacingErrorMessage } from '../shared/errors';
+import { ContextEntry } from '../shared/types';
 
 let vscodeModule: typeof vscodeTypes | undefined;
 try {
@@ -75,6 +76,7 @@ export class AgentPanelProvider {
     try {
       this.postMessage({ type: 'budget_update', budget: { maxTokens: 12000, usedTokens: 0, maxCostUsd: 1, usedCostUsd: 0, maxIterations: 20, currentIteration: 1 } });
 
+      const accumulatedContext: ContextEntry[] = [];
       const stream = await this.trueforgeClient.runTaskB(prompt);
 
       for await (const event of stream) {
@@ -83,18 +85,56 @@ export class AgentPanelProvider {
             this.postMessage({ type: 'token', text: event.text });
             break;
 
-          case 'tool_call':
+          case 'tool_call': {
             this.postMessage({
               type: 'tool_call',
               toolCallId: event.toolCallId,
               name: event.name,
               arguments: event.arguments
             });
-            break;
 
-          case 'tool_result':
-            this.postMessage({ type: 'tool_result', result: event.result });
+            // Track discovered files and context for map visualization (Task B visible flow)
+            if (['read_file', 'search_text', 'find_related', 'search_symbols'].includes(event.name)) {
+              const args = (event.arguments || {}) as Record<string, unknown>;
+              const targetUri = String(args.path || args.filePath || args.targetPath || args.query || args.name || 'workspace');
+              const reason = String(args.reason || args.explanation || `Tool invocation: ${event.name}`);
+
+              let entryType: ContextEntry['type'] = 'file';
+              if (event.name === 'search_text') entryType = 'snippet';
+              else if (event.name === 'find_related' || event.name === 'search_symbols') entryType = 'symbol';
+
+              const existingIdx = accumulatedContext.findIndex(e => e.uri === targetUri);
+              if (existingIdx >= 0) {
+                accumulatedContext[existingIdx].metadata = {
+                  ...accumulatedContext[existingIdx].metadata,
+                  reason
+                };
+              } else {
+                accumulatedContext.push({
+                  id: `ctx-${Date.now()}-${accumulatedContext.length}`,
+                  type: entryType,
+                  uri: targetUri,
+                  content: '',
+                  metadata: {
+                    tool: event.name,
+                    reason
+                  }
+                });
+              }
+              this.postMessage({ type: 'context_update', entries: [...accumulatedContext] });
+            }
             break;
+          }
+
+          case 'tool_result': {
+            this.postMessage({ type: 'tool_result', result: event.result });
+            if (event.result.output && accumulatedContext.length > 0) {
+              const last = accumulatedContext[accumulatedContext.length - 1];
+              last.tokenCount = Math.ceil(event.result.output.length / 4);
+              this.postMessage({ type: 'context_update', entries: [...accumulatedContext] });
+            }
+            break;
+          }
 
           case 'approval':
             this.postMessage({

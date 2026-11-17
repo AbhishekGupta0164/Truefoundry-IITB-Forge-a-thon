@@ -58,8 +58,13 @@
         },
         "forge.model": {
           "type": "string",
+          "default": "qwen2.5-coder:14b",
+          "description": "TrueForge primary model identifier (pinned 7B-14B coding model)"
+        },
+        "forge.fallbackModel": {
+          "type": "string",
           "default": "qwen2.5-coder:7b",
-          "description": "TrueForge model identifier (7B-14B coding model or hosted provider)"
+          "description": "TrueForge secondary fallback model used if primary model fails after retries"
         },
         "forge.temperature": {
           "type": "number",

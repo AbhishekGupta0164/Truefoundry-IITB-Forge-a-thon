@@ -89,35 +89,50 @@ export class TrueForgeClient {
       'Never read .env or secret files. Respect the retrieved-context budget.'
     ].join('\n');
 
-    return await withRetry(
-      async () => {
-        const sdk = await this.getSdk();
-        const { data: session } = await sdk.sessions.create({
-          agent: {
-            spec: {
-              model: {
-                name: targetModel,
-                params: {
-                  temperature: this.config.temperature
-                }
-              },
-              instructions,
-              mcpServers: [
-                {
-                  name: 'forge-workspace',
-                  requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
-                }
-              ]
-            }
+    const tryCreate = async (modelName: string): Promise<string> => {
+      const sdk = await this.getSdk();
+      const { data: session } = await sdk.sessions.create({
+        preload: false,
+        agent: {
+          spec: {
+            model: {
+              name: modelName,
+              params: {
+                temperature: this.config.temperature
+              }
+            },
+            instructions,
+            mcpServers: [
+              {
+                name: 'forge-workspace',
+                requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
+              }
+            ]
           }
-        });
+        }
+      });
 
-        this.sessionManager.setSession(session.id);
-        this.loopGuard.reset();
-        return session.id;
-      },
-      { targetUrl: this.config.baseUrl }
-    );
+      console.log(`[Forge] Session created: id=${session.id}, model=${modelName}, preload=false (compaction active)`);
+      this.sessionManager.setSession(session.id);
+      this.loopGuard.reset();
+      return session.id;
+    };
+
+    try {
+      return await withRetry(
+        () => tryCreate(targetModel),
+        { targetUrl: this.config.baseUrl }
+      );
+    } catch (err) {
+      if (this.config.fallbackModel && this.config.fallbackModel !== targetModel) {
+        console.warn(`[Forge] Primary model '${targetModel}' failed after retries. Failing over to fallback: '${this.config.fallbackModel}'`);
+        return await withRetry(
+          () => tryCreate(this.config.fallbackModel),
+          { targetUrl: this.config.baseUrl }
+        );
+      }
+      throw err;
+    }
   }
 
   /**

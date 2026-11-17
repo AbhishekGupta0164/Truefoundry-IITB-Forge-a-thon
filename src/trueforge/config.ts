@@ -13,6 +13,7 @@ export interface TrueForgeConfig {
   mcpPort: number;
   timeoutMs: number;
   model: string;
+  fallbackModel: string;
   temperature: number;
 }
 
@@ -20,7 +21,8 @@ export function getTrueForgeConfig(): TrueForgeConfig {
   let baseUrl = process.env.TRUEFORGE_BASE_URL || 'http://localhost:8790';
   let mcpPort = Number(process.env.MCP_PORT || 8765);
   let timeoutMs = 30000;
-  let model = process.env.TRUEFORGE_MODEL || 'qwen2.5-coder:7b';
+  let model = process.env.TRUEFORGE_MODEL || 'qwen2.5-coder:14b';
+  let fallbackModel = process.env.TRUEFORGE_FALLBACK_MODEL || 'qwen2.5-coder:7b';
   let temperature = 0;
 
   try {
@@ -30,6 +32,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
       mcpPort = config.get<number>('mcpPort', mcpPort);
       timeoutMs = config.get<number>('timeoutMs', timeoutMs);
       model = config.get<string>('model', model);
+      fallbackModel = config.get<string>('fallbackModel', fallbackModel);
       temperature = config.get<number>('temperature', temperature);
     }
   } catch {
@@ -41,6 +44,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
     mcpPort,
     timeoutMs,
     model,
+    fallbackModel,
     temperature
   };
 }

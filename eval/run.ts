@@ -9,6 +9,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import { TrueForgeClient } from '../src/trueforge/client';
 import { validatePythonSource } from '../src/review/validate';
 
@@ -45,6 +46,27 @@ export async function runEvaluation(): Promise<EvalResult[]> {
 
   const models: ModelConfig[] = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
   console.log(`Loaded ${models.length} model configuration(s) for evaluation.`);
+
+  // Fail-closed preflight check: fail immediately if TrueForge is down instead of writing PASS/FAIL table
+  const probeEndpoint = models[0]?.baseUrl || 'http://localhost:8790';
+  let isTrueForgeUp = false;
+  try {
+    const res = await fetch(`${probeEndpoint}/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+    if (res && res.status < 500) {
+      isTrueForgeUp = true;
+    } else {
+      const ping = await fetch(probeEndpoint, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+      if (ping) isTrueForgeUp = true;
+    }
+  } catch {
+    isTrueForgeUp = false;
+  }
+
+  if (!isTrueForgeUp) {
+    throw new Error(
+      `[FAIL CLOSED] TrueForge is down at ${probeEndpoint}. Please run './scripts/start-trueforge.sh' or 'scripts/dev/start.sh' first. Aborting evaluation.`
+    );
+  }
 
   const results: EvalResult[] = [];
 
@@ -193,7 +215,49 @@ export async function runEvaluation(): Promise<EvalResult[]> {
   console.log(`  - ${jsonPath}`);
   console.log(`  - ${mdPath}`);
 
+  // Run organizer verification commands against ../flask
+  const flaskDir = path.resolve(__dirname, '../../flask');
+  runOrganizerCommands(flaskDir);
+
   return results;
+}
+
+function runOrganizerCommands(flaskDir: string): void {
+  console.log(`\n============================================================`);
+  console.log(`    RUNNING ORGANIZER VERIFICATION COMMANDS (../flask)     `);
+  console.log(`============================================================\n`);
+
+  if (!fs.existsSync(flaskDir)) {
+    console.log(`[Notice] Flask workspace not found at ${flaskDir}. Skipping organizer checks.`);
+    return;
+  }
+
+  // 1. git diff --stat
+  try {
+    const diffStat = execSync('git diff --stat', { cwd: flaskDir, encoding: 'utf-8' });
+    console.log(`> git diff --stat:\n${diffStat.trim() || '(working tree clean)'}\n`);
+  } catch (err: any) {
+    console.log(`> git diff --stat: ${err.message}\n`);
+  }
+
+  // 2. get_debug_flag verification
+  try {
+    const pyCheck = execSync(
+      'python -c "import os; from flask.helpers import get_debug_flag; print(\'get_debug_flag() =\', get_debug_flag())"',
+      { cwd: flaskDir, encoding: 'utf-8', env: { ...process.env, PYTHONPATH: path.join(flaskDir, 'src') } }
+    );
+    console.log(`> get_debug_flag check:\n${pyCheck.trim()}\n`);
+  } catch (err: any) {
+    console.log(`> get_debug_flag check: ${err.message?.split('\n')[0]}\n`);
+  }
+
+  // 3. pytest
+  try {
+    const pytestOut = execSync('pytest tests/test_cli.py -q --tb=short', { cwd: flaskDir, encoding: 'utf-8' });
+    console.log(`> pytest tests/test_cli.py:\n${pytestOut.trim()}\n`);
+  } catch (err: any) {
+    console.log(`> pytest tests/test_cli.py: ${err.stdout?.split('\n')[0] || err.message?.split('\n')[0]}\n`);
+  }
 }
 
 function generateMarkdownTable(results: EvalResult[]): string {
