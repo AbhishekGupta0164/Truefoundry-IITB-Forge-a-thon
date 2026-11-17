@@ -130,3 +130,30 @@ Provide a resilient edit engine that is forgiving on input (tolerant to model fo
 6. **Tool-call repair**: Automatically repairs stringified JSON, alias argument keys, and strips leading slashes in paths.
 7. **In-memory validation pipeline**: Validates Python AST syntax in-memory before staging.
 8. **Hunk dependency graph**: Detects when later hunks rely on symbols/imports introduced in earlier hunks (`dependsOn`).
+
+
+---
+
+## T10: Real Evaluation Harness & Machine-Scored Rubric (C2 Anchor)
+
+### 1. Goal
+Provide a repeatable, machine-scored evaluation harness (`eval/run.ts`, `eval/rubric.ts`) that runs 3 iterations across 3 models:
+1. **Strong Hosted Model** (e.g., Claude 3.5 Sonnet)
+2. **Hosted Free-Tier Model** (e.g., Gemini 1.5 Flash)
+3. **Local Evaluation Model** (e.g., Llama 3.2 3B)
+
+### 2. Machine-Scored Rubric Metrics
+- **Task A**:
+  - Python AST syntax validity check.
+  - Case-insensitive boolean handling for `off`, `n`, `N`, `Off`.
+  - Comprehensive docstring listing every false value (`0`, `false`, `no`, `off`, `n`).
+  - Strict scope guard checking only `get_debug_flag` area was touched.
+- **Task B**:
+  - At least 3 files discovered and modified.
+  - `pytest tests/test_cli.py` passing status.
+  - `flask --help` listing `config` command.
+  - Configuration keys with `SECRET`, `PASSWORD`, `TOKEN`, `KEY` masked as `'***'`.
+  - Zero unapproved writes (`git status --porcelain` clean).
+- **Matrix Outputs**:
+  - Pass rate (%), median latency (ms), median tokens, median tool calls, flake rate (%), and common failure notes.
+  - Results written to `eval/results/results.json` and `eval/results/evaluation-table.md`.
