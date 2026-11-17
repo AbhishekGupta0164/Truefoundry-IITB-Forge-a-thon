@@ -157,3 +157,50 @@ Provide a repeatable, machine-scored evaluation harness (`eval/run.ts`, `eval/ru
 - **Matrix Outputs**:
   - Pass rate (%), median latency (ms), median tokens, median tool calls, flake rate (%), and common failure notes.
   - Results written to `eval/results/results.json` and `eval/results/evaluation-table.md`.
+
+---
+
+## T11: Stress Tests on Big Repos (B3, A3)
+
+### 1. Goal
+Verify that all MCP tools (`search_symbols`, `search_text`, `read_file`, `find_related`) handle large repositories (500+ files, 1 MB+ content, real-world repos like Flask) within strict performance budgets and memory limits without deadlock or OOM.
+
+### 2. Implementation & Test Coverage
+- **Performance Budgets**:
+  - `search_symbols` across 600+ synthetic files and 1000+ Flask files completes in < 5000 ms.
+  - `search_text` across large workspaces finishes within < 5000 ms.
+  - `read_file` on large files (1 MB+) returns within < 1000 ms.
+- **Output Capping & Sanitization**:
+  - `sanitizeToolOutput` strictly bounds raw text output to `DEFAULT_TOOL_OUTPUT_CAP` (2048 chars / ~2 KB) with a clear `[Output truncated to ...]` truncation marker.
+  - Prevents context window explosion and OOM when tools encounter high-frequency matches or huge files.
+- **Concurrency & Deadlock Prevention**:
+  - Verified 10 concurrent symbol search tool calls complete without deadlock or race conditions in < 15 seconds.
+- **Memory Boundedness**:
+  - Verified heap growth during full workspace traversal stays well under 512 MB.
+- **Spike & Unit Tests**:
+  - `test/unit/t11-stress-tests.test.ts` (8 passing stress tests).
+  - `spikes/verify-t11.ts` (manual executable verification spike).
+
+---
+
+## T12: Package VSIX, CI Pipeline, & README (Submission)
+
+### 1. Goal
+Prepare complete submission artifacts, ensure clean VSIX packaging, continuous integration automation, and thorough reproduction documentation for evaluators.
+
+### 2. Implementation & Artifacts
+- **VSIX Packaging**:
+  - Configured `.vscodeignore` to exclude development assets (`src/`, `test/`, `eval/`, `spikes/`, configuration files).
+  - Added `package` and `vsce-package` scripts via `@vscode/vsce package --no-dependencies`.
+  - Verified packaging produces a clean ~562 KB `forge-agent-0.1.0.vsix` containing 35 essential distribution files.
+- **CI Pipeline (`.github/workflows/ci.yml`)**:
+  - Triggers on `main` and `feat/*` branches.
+  - Enforces full quality gates: dependency install, extension build, typecheck, linting, unit test suite, and VSIX packaging verification.
+- **Demo & Reproduction Guide (`demo/README.md`)**:
+  - Detailed step-by-step reproduction instructions for Tasks A, B, and C.
+  - Video walkthrough link placeholder.
+- **Judge Scorecard & README**:
+  - Synchronized documentation with 186 unit tests across 30 files.
+  - Updated rubric breakdown demonstrating protected points across all competition dimensions.
+- **Tests**:
+  - `test/unit/t12-package-ci-readme.test.ts` (4 passing submission-readiness tests).

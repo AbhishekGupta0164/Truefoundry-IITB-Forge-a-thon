@@ -276,6 +276,7 @@ describe('T6 End-to-End: Cancel plus one-gesture undo', () => {
     expect(undoRes.revertedFiles.length).toBeGreaterThan(0);
 
     // Working tree is completely clean again
+    try { execSync('git update-index --refresh', { cwd: repoRoot }); } catch { /* ignore */ }
     const gitStatus = execSync(`git status --porcelain ${fixtureRel}`, { cwd: repoRoot }).toString().trim();
     expect(gitStatus).toBe('');
     expect(fs.readFileSync(fixtureAbs, 'utf-8')).toBe(pristineContent);

@@ -138,7 +138,8 @@ export class UndoManager {
         ...edit.originalLines,
         ...lines.slice((matchIdx !== -1 ? matchIdx : nominalIdx) + count)
       ];
-      const revertedContent = updatedLines.join('\n');
+      const eol = currentContent.includes('\r\n') ? '\r\n' : '\n';
+      const revertedContent = updatedLines.join(eol);
 
       await this.applyContentToPath(edit.file, revertedContent);
       revertedFilesSet.add(edit.file);

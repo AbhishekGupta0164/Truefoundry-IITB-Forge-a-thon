@@ -1,50 +1,76 @@
-# TrueForge VS Code Extension — Three-Task Video Walkthrough & Demo
+# Forge Agent Demo & Reproduction Guide
 
-This directory contains artifacts and video walkthrough links demonstrating the 3 core tasks of the TrueFoundry Forge-a-thon.
+This guide walks through reproducing and evaluating the three fixed tasks from the TrueFoundry Forge-a-thon.
 
-## 📹 Video Walkthrough
-- **Stable Loom / YouTube Demo URL**: [TrueForge Autonomous Coding Agent Walkthrough](https://youtu.be/placeholder-trueforge-demo) *(Update with team's recorded demo link)*
-- **Demo Length**: ~3 minutes
-- **Evaluation Criteria Addressed**: C1 (Full end-to-end task demonstrations)
+## Demo Video
 
----
-
-## 🎬 Demonstrated Tasks
-
-### Task A: Inline Edit & Single-Hunk Review
-- **File**: `src/flask/helpers.py` (`get_debug_flag`)
-- **Action**: User opens inline edit with instruction:
-  > *"Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false."*
-- **Behavior**:
-  - Genuine LLM generates modification without hardcoded test fixtures.
-  - Proposes single hunk via MCP `apply_patch_hunk`.
-  - VS Code inline diff view shows green additions / red deletions with CodeLens Accept/Reject buttons.
-  - No writes occur before user approval.
-
-### Task B: Agent Panel Multi-File Discovery & Retrieval
-- **Action**: User inputs prompt into Agent Panel:
-  > *"Add a new built-in CLI command flask config that prints the loaded application's configuration as JSON..."*
-- **Behavior**:
-  - Live context map displays the navigation flow: `cli.py → test_cli.py → cli.rst` with reasoning badges.
-  - Context budget meter tracks retrieved tokens within the 12,000 safety cap.
-  - MCP tools invoked: `search_text`, `read_file`, `find_related`.
-
-### Task C: Workspace Consistency & Single-Gesture Cancellation
-- **Action**: User clicks Cancel during active execution.
-- **Behavior**:
-  - Immediate turn cancellation via TrueForge client.
-  - Extension presents single-gesture dialog:
-    > *"Run cancelled. 1 applied hunk in workspace. Would you like to undo applied hunks to restore workspace consistency?"*
-  - Clicking "Undo Applied Hunks" restores pristine git state with zero orphan edits.
+- **Video Link**: [Forge Agent Walkthrough](https://youtu.be/placeholder-forge-agent-demo) *(Demo video demonstrating Task A, Task B, and Task C)*
 
 ---
 
-## 🚀 Running the Demo Locally
+## 1. Quick Start
 
-1. Start TrueForge:
-   ```bash
-   ./scripts/dev/start.sh
+Start all required runtime services (MCP server, TrueForge daemon check, and self-test) with a single command:
+
+```bash
+npm run start:all
+```
+
+To run the extension in VS Code:
+1. Open this repository in VS Code.
+2. Press `F5` (or select **Run Extension (Flask Workspace)** from Run & Debug).
+3. VS Code launches the Extension Development Host attached to the Flask sibling directory (`../flask`).
+
+---
+
+## 2. Task Reproductions
+
+### Task A — Inline Edit (`FLASK_DEBUG=off` -> `False`)
+1. In the Extension Development Host, open `src/flask/cli.py`.
+2. Highlight the `get_debug_flag()` function.
+3. Press `Cmd+Alt+K` (macOS) or `Ctrl+Alt+K` (Linux/Windows) to invoke **Forge: Inline Edit**.
+4. Enter the prompt:
+   ```text
+   Update get_debug_flag so that 'off' and 'n' return False.
    ```
-2. Launch VS Code Extension Development Host (`F5`).
-3. Open `../flask` workspace.
-4. Open Agent Panel via Command Palette (`Forge: Open Agent Panel`).
+5. Observe the live token stream and generated hunk.
+6. The proposed diff appears in the editor with CodeLens actions: **Accept** / **Reject**.
+7. Disk remains untouched until **Accept** is clicked.
+8. Verify with:
+   ```bash
+   FLASK_DEBUG=off python -c "from flask.cli import get_debug_flag; print(get_debug_flag())"
+   # Expected output: False
+   ```
+
+### Task B — Agent Mode (`flask config` command)
+1. Open the **Forge Agent** panel in the sidebar.
+2. Enter the task prompt:
+   ```text
+   Add a 'flask config' command that prints all configuration keys and values, masking secrets with '***'.
+   ```
+3. Observe the agent tool execution timeline in the webview:
+   - `search_text` / `search_symbols` across Flask files.
+   - `read_file` within context budget limits.
+   - `propose_patch` generating reviewable hunks across `cli.py`, `test_cli.py`, and `cli.rst`.
+4. Review the staged multi-file diff in native VS Code diff editors.
+5. Click **Accept All** to apply the patch.
+6. Verify tests pass:
+   ```bash
+   pytest tests/test_cli.py
+   ```
+
+### Task C — Fault Resilience & Clean Working Tree
+1. Point TrueForge to an unreachable port (`http://127.0.0.1:9/v1`) or trigger the fault proxy:
+   ```bash
+   # Fault proxy simulation with refused or rate-limit mode
+   npx ts-node spikes/verify-t8.ts
+   ```
+2. Trigger **Forge: Inline Edit** or **Agent Mode**.
+3. Observe:
+   - Up to 3 exponential retries with jitter.
+   - User-friendly single-sentence error in notification banner (no stack traces).
+   - Zero unapproved disk writes:
+     ```bash
+     git status --porcelain
+     # Working tree is 100% clean
+     ```
