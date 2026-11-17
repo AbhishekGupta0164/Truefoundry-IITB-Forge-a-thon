@@ -202,53 +202,6 @@ export class InlineEditController {
     defaultStatusBar.setPendingReviews(remainingHunks);
     vscodeModule?.window?.showInformationMessage(`Forge: Rejected hunk ${hunkId.slice(0, 8)}`);
   }
-
-  /**
-   * Preserved auxiliary replacement generator for unit tests and fallback fixtures.
-   */
-  public async generateReplacement(params: {
-    filePath: string;
-    selectedText: string;
-    instruction: string;
-    fullContent: string;
-  }): Promise<string> {
-    const { selectedText, instruction } = params;
-
-    const lowerInst = instruction.toLowerCase();
-    if (
-      (lowerInst.includes('off') && lowerInst.includes('n') && lowerInst.includes('false')) ||
-      lowerInst.includes('get_debug_flag')
-    ) {
-      return this.transformGetDebugFlag(selectedText);
-    }
-
-    return selectedText;
-  }
-
-  private transformGetDebugFlag(text: string): string {
-    let result = text;
-
-    if (result.includes('{"0", "false", "no"}')) {
-      result = result.replace(
-        '{"0", "false", "no"}',
-        '{"0", "false", "no", "off", "n"}'
-      );
-    } else if (result.includes('("0", "false", "no")')) {
-      result = result.replace(
-        '("0", "false", "no")',
-        '("0", "false", "no", "off", "n")'
-      );
-    }
-
-    if (result.includes('The default is ``False``.')) {
-      result = result.replace(
-        'The default is ``False``.',
-        'The default is ``False``.\n    Values treated as false are: "0", "false", "no", "off", and "n" (case-insensitive).'
-      );
-    }
-
-    return result;
-  }
 }
 
 export const defaultInlineEditController = new InlineEditController();
