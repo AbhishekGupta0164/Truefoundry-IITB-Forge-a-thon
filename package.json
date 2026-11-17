@@ -97,6 +97,7 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run build",
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
@@ -104,7 +105,9 @@
     "test:unit": "vitest run",
     "test:e2e": "vscode-test",
     "eval": "tsx eval/run.ts",
-    "start:all": "node scripts/start-all.mjs"
+    "start:all": "node scripts/start-all.mjs",
+    "package": "vsce package --no-dependencies",
+    "vsce-package": "vsce package --no-dependencies"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.5.0",

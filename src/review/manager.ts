@@ -197,7 +197,8 @@ export class ReviewManager {
       ...replacementLines,
       ...fileLines.slice(startIdx + count)
     ];
-    const newContent = updatedLines.join('\n');
+    const eol = currentContent.includes('\r\n') ? '\r\n' : '\n';
+    const newContent = updatedLines.join(eol);
 
     // 1. Apply via VS Code WorkspaceEdit if inside extension host
     try {

@@ -180,3 +180,27 @@ Verify that all MCP tools (`search_symbols`, `search_text`, `read_file`, `find_r
 - **Spike & Unit Tests**:
   - `test/unit/t11-stress-tests.test.ts` (8 passing stress tests).
   - `spikes/verify-t11.ts` (manual executable verification spike).
+
+---
+
+## T12: Package VSIX, CI Pipeline, & README (Submission)
+
+### 1. Goal
+Prepare complete submission artifacts, ensure clean VSIX packaging, continuous integration automation, and thorough reproduction documentation for evaluators.
+
+### 2. Implementation & Artifacts
+- **VSIX Packaging**:
+  - Configured `.vscodeignore` to exclude development assets (`src/`, `test/`, `eval/`, `spikes/`, configuration files).
+  - Added `package` and `vsce-package` scripts via `@vscode/vsce package --no-dependencies`.
+  - Verified packaging produces a clean ~562 KB `forge-agent-0.1.0.vsix` containing 35 essential distribution files.
+- **CI Pipeline (`.github/workflows/ci.yml`)**:
+  - Triggers on `main` and `feat/*` branches.
+  - Enforces full quality gates: dependency install, extension build, typecheck, linting, unit test suite, and VSIX packaging verification.
+- **Demo & Reproduction Guide (`demo/README.md`)**:
+  - Detailed step-by-step reproduction instructions for Tasks A, B, and C.
+  - Video walkthrough link placeholder.
+- **Judge Scorecard & README**:
+  - Synchronized documentation with 186 unit tests across 30 files.
+  - Updated rubric breakdown demonstrating protected points across all competition dimensions.
+- **Tests**:
+  - `test/unit/t12-package-ci-readme.test.ts` (4 passing submission-readiness tests).

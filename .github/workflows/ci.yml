@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, "feat/*" ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, "feat/*" ]
 
 jobs:
   build:
@@ -27,3 +27,5 @@ jobs:
         run: npm run lint
       - name: Run Unit Tests
         run: npm run test:unit
+      - name: Verify VSIX Packaging
+        run: npx @vscode/vsce package --no-dependencies

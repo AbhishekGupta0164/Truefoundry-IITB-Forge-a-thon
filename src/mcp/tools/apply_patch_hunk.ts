@@ -165,7 +165,8 @@ export async function executeApplyPatchHunk(
     ...newLinesFromHunk,
     ...fileLines.slice(startIdx + (hunk.oldLines > 0 ? hunk.oldLines : oldLinesFromHunk.length))
   ];
-  const newFullContent = updatedLines.join('\n');
+  const eol = currentContent.includes('\r\n') ? '\r\n' : '\n';
+  const newFullContent = updatedLines.join(eol);
 
   // 4. Apply changes via VS Code WorkspaceEdit
   try {
