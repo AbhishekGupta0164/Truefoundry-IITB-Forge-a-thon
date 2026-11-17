@@ -10,11 +10,63 @@ import { defaultStatusBar } from './ui/status-bar';
 import { defaultDiffViewManager } from './review/diff-view';
 import { defaultReviewManager } from './review/manager';
 import { defaultTrueForgeClient } from './trueforge/client';
+import { startTrueForge, stopTrueForge, getLastLogLines } from './runtime/launcher';
+import { runSelfTest } from './runtime/self-test';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs';
 
 let mcpServerManager: MCPServerManager | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('Forge Agent extension is now active!');
+
+  // ── T5: Runtime output channel ───────────────────────────────────────────
+  const runtimeOut = vscode.window.createOutputChannel('Forge Runtime');
+
+  /** Helper: run startTrueForge and update status bar. */
+  async function doStartAll(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('forge');
+    const url = cfg.get<string>('trueforgeUrl', 'http://localhost:8790');
+    const version = cfg.get<string>('trueforgeVersion', '0.184.3');
+    const model = cfg.get<string>('model', '');
+
+    defaultStatusBar.setStarting();
+    const result = await startTrueForge(runtimeOut, url, version);
+
+    if (result === 'ready') {
+      defaultStatusBar.setRuntimeReady(model);
+    } else if (result === 'migration-error') {
+      defaultStatusBar.setDown();
+      const choice = await vscode.window.showWarningMessage(
+        'TrueForge migration error — data directory incompatible.',
+        'Reset TrueForge data'
+      );
+      if (choice === 'Reset TrueForge data') {
+        const dataDir =
+          cfg.get<string>('trueforgeDataDir', '') ||
+          path.join(os.homedir(), '.trueforge');
+        const bakDir = dataDir + '.bak';
+        try {
+          if (fs.existsSync(bakDir)) {
+            fs.rmSync(bakDir, { recursive: true, force: true });
+          }
+          fs.renameSync(dataDir, bakDir);
+          runtimeOut.appendLine(`[Forge] Renamed ${dataDir} → ${bakDir}`);
+          await doStartAll(); // retry after reset
+        } catch (e: any) {
+          vscode.window.showErrorMessage(`Forge: Failed to reset data dir: ${e.message}`);
+        }
+      }
+    } else {
+      // timeout
+      defaultStatusBar.setDown();
+      const lastLog = getLastLogLines();
+      vscode.window.showErrorMessage(
+        `Forge: TrueForge did not start within 60 s.\n\nLast log:\n${lastLog}`
+      );
+    }
+  }
 
   // Initialize and start MCP Server
   const authenticator = new MCPAuthenticator(context.secrets);
@@ -22,6 +74,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const config = vscode.workspace.getConfiguration('forge');
   const port = config.get<number>('mcpPort', 8765);
+
+  // ── T5: Auto-start TrueForge ─────────────────────────────────────────────
+  const autoStart = config.get<boolean>('autoStart', true);
+  if (autoStart) {
+    doStartAll().catch(console.error);
+  }
 
   try {
     await mcpServerManager.start({ port });
@@ -96,6 +154,22 @@ export async function activate(context: vscode.ExtensionContext) {
     );
   });
 
+  // ── T5: Runtime commands ─────────────────────────────────────────────────
+
+  const startAllCmd = vscode.commands.registerCommand('forge.startAll', async () => {
+    await doStartAll();
+  });
+
+  const stopAllCmd = vscode.commands.registerCommand('forge.stopAll', () => {
+    stopTrueForge();
+    defaultStatusBar.setDown();
+    vscode.window.showInformationMessage('Forge: TrueForge stopped.');
+  });
+
+  const selfTestCmd = vscode.commands.registerCommand('forge.selfTest', async () => {
+    await runSelfTest();
+  });
+
   const copyMcpConfigCmd = vscode.commands.registerCommand('forge.copyMcpConfig', async () => {
     const activePort = mcpServerManager ? mcpServerManager.getPort() : port;
     const token = await authenticator.getOrCreateToken();
@@ -144,10 +218,14 @@ export async function activate(context: vscode.ExtensionContext) {
     openPanelCmd,
     cancelCmd,
     undoTaskCmd,
+    startAllCmd,
+    stopAllCmd,
+    selfTestCmd,
     copyMcpConfigCmd,
     codeLensDisposable,
     originalDocProvider,
     proposedDocProvider,
+    runtimeOut,
     {
       dispose: () => {
         defaultStatusBar.dispose();
@@ -161,6 +239,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
+  stopTrueForge();
   if (mcpServerManager) {
     await mcpServerManager.stop();
     mcpServerManager = null;
