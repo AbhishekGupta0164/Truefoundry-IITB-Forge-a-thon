@@ -345,17 +345,4 @@ Anchors from the organizer rubric. **Between two anchors, the lower value is use
 - MCP auth, path confinement, and command allowlist are actually tested.
 - Module READMEs (`src/*/README.md`) match the code more closely than typical hackathon docs.
 
-### What to do more of (standout path)
 
-1. **Make Task B visible:** post `context_update` from `read_file` / `search_text` / `find_related` with path + reason; screenshot the map showing `cli.py` → `test_cli.py` → `cli.rst`.
-2. **Pass `preload: false` (or compaction) in `createSession`** and show it in the session log — that is the B4 10-point jump.
-3. **Second model in config** + automatic failover after retries — B3 10.
-4. **Cancel that offers undo of applied hunks in one gesture** so A3 can honestly claim workspace consistency.
-5. **Delete or clearly quarantine `transformGetDebugFlag`** so Task A cannot be accused of being a fixture.
-6. **Fix the eval harness** to run organizer commands (`get_debug_flag`, `pytest`, `git diff --stat`) against `../flask`, and fail closed if TrueForge is down rather than writing a PASS/FAIL table of connection errors.
-7. **Check a three-task video into `demo/`** (or a stable URL). C1 is free points the repo currently leaves on the table.
-8. **Pin a 7B–14B coding model** in `scripts/dev/start.sh` and `forge.model`; 3B is not a fair coding eval.
-9. **Repair TrueForge migrations** in the runbook so a judge can `./scripts/start-trueforge.sh` without archaeology.
-
-That list is the difference between a strong Stage-3 VS Code review engine and a product a platform team would actually keep.
-)
