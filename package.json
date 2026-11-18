@@ -80,7 +80,7 @@
         },
         "forge.fallbackModel": {
           "type": "string",
-          "default": "qwen2.5-coder:7b",
+          "default": "ollama/llama3-2-3b",
           "description": "TrueForge secondary fallback model used if primary model fails after retries"
         },
         "forge.temperature": {

@@ -1,50 +1,208 @@
-[
-  {
-    "model": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
-    "task": "Task A (Inline Edit)",
-    "result": "FAIL",
-    "latencyMs": 16758,
-    "tokensUsed": 0,
-    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
+{
+  "matrix": [
+    {
+      "modelName": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
+      "tier": "strong_hosted",
+      "totalRuns": 6,
+      "passRate": 0,
+      "medianLatencyMs": 9,
+      "medianTokens": 0,
+      "medianToolCalls": 1,
+      "flakeRate": 0,
+      "commonFailure": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+    },
+    {
+      "modelName": "Gemini 1.5 Flash (Hosted Free-Tier Model)",
+      "tier": "free_tier",
+      "totalRuns": 6,
+      "passRate": 0,
+      "medianLatencyMs": 7,
+      "medianTokens": 0,
+      "medianToolCalls": 1,
+      "flakeRate": 0,
+      "commonFailure": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+    },
+    {
+      "modelName": "Llama 3.2 3B (Local Evaluation Model)",
+      "tier": "local_3b",
+      "totalRuns": 6,
+      "passRate": 0,
+      "medianLatencyMs": 11,
+      "medianTokens": 0,
+      "medianToolCalls": 1,
+      "flakeRate": 0,
+      "commonFailure": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+    }
+  ],
+  "detailedRuns": {
+    "Claude 3.5 Sonnet (Strong Hosted Demo Model)": [
+      {
+        "runIndex": 1,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 2037,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 1,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 9,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 2,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 5,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 2,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 14,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 3,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 7,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 3,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 8,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      }
+    ],
+    "Gemini 1.5 Flash (Hosted Free-Tier Model)": [
+      {
+        "runIndex": 1,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 8,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 1,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 12,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 2,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 7,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 2,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 5,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 3,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 5,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 3,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 7,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      }
+    ],
+    "Llama 3.2 3B (Local Evaluation Model)": [
+      {
+        "runIndex": 1,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 10,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 1,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 12,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 2,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 11,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 2,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 11,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 3,
+        "task": "Task A",
+        "passed": false,
+        "latencyMs": 5,
+        "tokensUsed": 0,
+        "toolCallsCount": 1,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      },
+      {
+        "runIndex": 3,
+        "task": "Task B",
+        "passed": false,
+        "latencyMs": 15,
+        "tokensUsed": 0,
+        "toolCallsCount": 0,
+        "failureReason": "UnprocessableEntityError\nStatus code: 422\nBody: {\n  \"error\": {\n    \"message\": \"Model name must be a fully qualified \\\"provider/model\\\": qwen2.5-coder:7b\"\n  }\n}"
+      }
+    ]
   },
-  {
-    "model": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
-    "task": "Task B (Agent CLI Command)",
-    "result": "FAIL",
-    "latencyMs": 10296,
-    "tokensUsed": 0,
-    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
-  },
-  {
-    "model": "Gemini 1.5 Flash (Hosted Free-Tier Model)",
-    "task": "Task A (Inline Edit)",
-    "result": "FAIL",
-    "latencyMs": 7069,
-    "tokensUsed": 0,
-    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
-  },
-  {
-    "model": "Gemini 1.5 Flash (Hosted Free-Tier Model)",
-    "task": "Task B (Agent CLI Command)",
-    "result": "FAIL",
-    "latencyMs": 7044,
-    "tokensUsed": 0,
-    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
-  },
-  {
-    "model": "Llama 3.2 3B (Local Evaluation Model)",
-    "task": "Task A (Inline Edit)",
-    "result": "FAIL",
-    "latencyMs": 7049,
-    "tokensUsed": 0,
-    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
-  },
-  {
-    "model": "Llama 3.2 3B (Local Evaluation Model)",
-    "task": "Task B (Agent CLI Command)",
-    "result": "FAIL",
-    "latencyMs": 7049,
-    "tokensUsed": 0,
-    "reason": "Can't reach the model at http://localhost:8790. Check TrueForge settings."
-  }
-]
+  "timestamp": "2026-11-18T12:00:54.879Z"
+}

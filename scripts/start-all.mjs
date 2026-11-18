@@ -105,7 +105,7 @@ const tfArgs = ['--yes', `@truefoundry/trueforge@${VERSION}`, '--port', TF_PORT]
 const tfProc = spawn(WIN ? 'npx.cmd' : 'npx', tfArgs, {
   env: {
     ...process.env,
-    NETWORK_POLICY_ENABLED: 'true',
+    NETWORK_POLICY_ENABLED: 'false',
     OUTBOUND_URL_ALLOWED_HOSTS: '["localhost","127.0.0.1"]',
   },
   shell: WIN,
