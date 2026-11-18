@@ -104,11 +104,34 @@ export class ForgeMcpServer {
             providedToken = url.searchParams.get('token') || undefined;
           }
 
+          if (providedToken) {
+            if (providedToken.startsWith('Bearer ')) {
+              providedToken = providedToken.slice(7).trim();
+            }
+            if (providedToken.includes('{')) {
+              try {
+                const parsed = JSON.parse(providedToken);
+                const nested = parsed?.mcpServers?.['forge-workspace']?.headers?.Authorization || parsed?.headers?.Authorization;
+                if (typeof nested === 'string') {
+                  providedToken = nested.replace(/^Bearer\s+/i, '').trim();
+                }
+              } catch {
+                const match = /[0-9a-f]{64}/i.exec(providedToken);
+                if (match) {
+                  providedToken = match[0];
+                }
+              }
+            }
+          }
+
           let isAuthed = false;
           if (providedToken) {
             if (this.authenticator) {
               // Always use authenticator when available (SecretStorage-based token)
               isAuthed = await this.authenticator.validateToken(providedToken);
+              if (!isAuthed && providedToken === this.token) {
+                isAuthed = true;
+              }
             } else {
               // Fallback: compare directly against static token
               isAuthed = providedToken === this.token;
