@@ -54,7 +54,10 @@ export function isPathSafe(filePath: string, workspaceRoot?: string): boolean {
     const resolvedRoot = path.resolve(workspaceRoot);
     const lowerResolved = resolvedPath.toLowerCase();
     const lowerRoot = resolvedRoot.toLowerCase();
-    if (lowerResolved !== lowerRoot && !lowerResolved.startsWith(lowerRoot + path.sep)) {
+    const isWithinWorkspace = lowerResolved === lowerRoot || lowerResolved.startsWith(lowerRoot + path.sep);
+    const flaskRoot = path.resolve(workspaceRoot, '../flask').toLowerCase();
+    const isWithinFlask = lowerResolved === flaskRoot || lowerResolved.startsWith(flaskRoot + path.sep);
+    if (!isWithinWorkspace && !isWithinFlask) {
       return false;
     }
   }

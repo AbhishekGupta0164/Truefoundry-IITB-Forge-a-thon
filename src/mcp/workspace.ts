@@ -57,6 +57,12 @@ export class WorkspaceManager {
       return fullPath;
     }
 
+    // Check sibling flask repo if running from forge-agent workspace
+    const flaskCandidate = path.resolve(this.workspaceRoot, '../flask', relativePath);
+    if (fs.existsSync(flaskCandidate)) {
+      return flaskCandidate;
+    }
+
     // If target does not exist, check existing parent directories for symlink escape
     let currentDir = path.dirname(fullPath);
     while (!fs.existsSync(currentDir)) {
