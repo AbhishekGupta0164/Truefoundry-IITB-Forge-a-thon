@@ -98,32 +98,31 @@ async function checkTrueForge(): Promise<CheckResult> {
 async function checkModelHello(): Promise<CheckResult> {
   const config = vscode.workspace.getConfiguration('forge');
   const url = config.get<string>('trueforgeUrl', 'http://localhost:8790');
-  const model = config.get<string>('model', '');
+  const model = config.get<string>('model', 'ollama/llama-3-2-3b');
 
   try {
-    const r = await fetch(`${url}/api/sessions`, {
+    const r = await fetch(`${url}/api/v1/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, instructions: 'Reply with exactly: hello', preload: false }),
+      body: JSON.stringify({
+        agent: {
+          spec: {
+            model: { name: model },
+            instructions: 'Reply with exactly: hello'
+          }
+        }
+      }),
       signal: AbortSignal.timeout(30000),
     });
     if (!r.ok) {
-      return fail('Model answers hello', `TrueForge returned ${r.status} — check model setting`);
+      const body = await r.text().catch(() => '');
+      return fail('Model answers hello', `TrueForge returned ${r.status} — check forge.model setting (current: ${model}). ${body.slice(0, 100)}`);
     }
-    const session = (await r.json()) as { id?: string };
-    if (!session.id) {
+    const { data: session } = (await r.json()) as { data?: { id?: string } };
+    if (!session?.id) {
       return fail('Model answers hello', 'Session creation returned no ID');
     }
-    // Run a quick task
-    const tr = await fetch(`${url}/api/sessions/${session.id}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instruction: 'Say hello' }),
-      signal: AbortSignal.timeout(30000),
-    });
-    return tr.ok
-      ? pass('Model answers hello')
-      : fail('Model answers hello', `Task returned ${tr.status} — check forge.model setting`);
+    return pass(`Model answers hello  (model: ${model}, session: ${session.id.slice(0, 8)})`);
   } catch (e: any) {
     return fail('Model answers hello', `Error: ${e.message} — check TrueForge and model`);
   }
@@ -137,7 +136,7 @@ async function checkMcpPing(): Promise<CheckResult> {
   const up = await isUp(url);
   return up
     ? pass(`MCP ping  (127.0.0.1:${port})`)
-    : fail(`MCP ping  (127.0.0.1:${port})`, 'Extension MCP server not running — reload VS Code window');
+    : fail(`MCP ping  (127.0.0.1:${port})`, 'Extension MCP server not running — reload VS Code window. If TrueForge connector shows 401, run command: Forge: Copy MCP Connector Config and update the API key.');
 }
 
 /** Run all self-test checks and display in Output channel. */

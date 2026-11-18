@@ -75,12 +75,12 @@
         },
         "forge.model": {
           "type": "string",
-          "default": "qwen2.5-coder:14b",
+          "default": "ollama/llama-3-2-3b",
           "description": "TrueForge primary model identifier (pinned 7B-14B coding model)"
         },
         "forge.fallbackModel": {
           "type": "string",
-          "default": "ollama/llama3-2-3b",
+          "default": "ollama/llama-3-2-3b",
           "description": "TrueForge secondary fallback model used if primary model fails after retries"
         },
         "forge.temperature": {
@@ -131,7 +131,7 @@
     "esbuild": "^0.21.5",
     "eslint": "^8.57.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.4.5",
+    "typescript": "~5.5.4",
     "vitest": "^1.6.0"
   }
 }

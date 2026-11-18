@@ -14,7 +14,7 @@ import { createSpikeServer } from './s2-mcp';
 
 const TRUEFORGE_URL = process.env.TRUEFORGE_BASE_URL ?? 'http://localhost:8790';
 const MODEL_NAME = process.env.TRUEFORGE_MODEL ?? 'ollama/llama-3-2-3b';
-const MCP_PORT = 8765;
+const MCP_PORT = process.env.MCP_PORT ? Number(process.env.MCP_PORT) : 8768;
 const MCP_TOKEN = 'forge-s3-token-secret';
 
 export interface S3SpikeReportData {
