@@ -311,44 +311,6 @@ function generateMarkdownMatrix(rows: ModelMatrixRow[]): string {
   return lines.join('\n');
 }
 
-function runOrganizerCommands(flaskDir: string): void {
-  console.log(`\n============================================================`);
-  console.log(`    RUNNING ORGANIZER VERIFICATION COMMANDS (../flask)     `);
-  console.log(`============================================================\n`);
-
-  if (!fs.existsSync(flaskDir)) {
-    console.log(`[Notice] Flask workspace not found at ${flaskDir}. Skipping organizer checks.`);
-    return;
-  }
-
-  // 1. git diff --stat
-  try {
-    const diffStat = execSync('git diff --stat', { cwd: flaskDir, encoding: 'utf-8' });
-    console.log(`> git diff --stat:\n${diffStat.trim() || '(working tree clean)'}\n`);
-  } catch (err: any) {
-    console.log(`> git diff --stat: ${err.message}\n`);
-  }
-
-  // 2. get_debug_flag verification
-  try {
-    const pyCheck = execSync(
-      'python -c "import os; from flask.helpers import get_debug_flag; print(\'get_debug_flag() =\', get_debug_flag())"',
-      { cwd: flaskDir, encoding: 'utf-8', env: { ...process.env, PYTHONPATH: path.join(flaskDir, 'src') } }
-    );
-    console.log(`> get_debug_flag check:\n${pyCheck.trim()}\n`);
-  } catch (err: any) {
-    console.log(`> get_debug_flag check: ${err.message?.split('\n')[0]}\n`);
-  }
-
-  // 3. pytest
-  try {
-    const pytestOut = execSync('pytest tests/test_cli.py -q --tb=short', { cwd: flaskDir, encoding: 'utf-8' });
-    console.log(`> pytest tests/test_cli.py:\n${pytestOut.trim()}\n`);
-  } catch (err: any) {
-    console.log(`> pytest tests/test_cli.py: ${err.stdout?.split('\n')[0] || err.message?.split('\n')[0]}\n`);
-  }
-}
-
 if (require.main === module) {
   runEvaluation().catch(err => {
     console.error('Fatal evaluation error:', err);

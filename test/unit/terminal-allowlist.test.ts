@@ -91,7 +91,7 @@ describe('run_terminal_command Allowlist and Execution Invariants (Items 26-31)'
       wsManager
     );
     expect(statusResult.exitCode).toBe(0);
-    expect(statusResult.stdout).toContain('On branch');
+    expect(statusResult.stdout).toMatch(/(On branch|HEAD detached)/);
 
     const diffResult = await executeRunTerminalCommand(
       { argv: ['git', 'diff'] },
