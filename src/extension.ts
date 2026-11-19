@@ -98,6 +98,13 @@ export async function activate(context: vscode.ExtensionContext) {
     'forge.acceptHunk',
     async (patchId: string, hunkId: string) => {
       try {
+        // If the agent is paused waiting to apply this hunk, approve the TrueForge call
+        // so the write happens through apply_patch_hunk on the harness side.
+        if (await defaultAgentPanel.decideHunkApproval(patchId, hunkId, 'accept')) {
+          defaultCodeLensProvider.refresh();
+          vscode.window.showInformationMessage(`Forge: Approved hunk ${hunkId}`);
+          return;
+        }
         await defaultReviewManager.acceptHunk(patchId, hunkId);
         defaultCodeLensProvider.refresh();
         vscode.window.showInformationMessage(`Forge: Accepted hunk ${hunkId}`);
@@ -111,6 +118,11 @@ export async function activate(context: vscode.ExtensionContext) {
     'forge.rejectHunk',
     async (patchId: string, hunkId: string) => {
       try {
+        if (await defaultAgentPanel.decideHunkApproval(patchId, hunkId, 'reject')) {
+          defaultCodeLensProvider.refresh();
+          vscode.window.showInformationMessage(`Forge: Denied hunk ${hunkId}`);
+          return;
+        }
         defaultReviewManager.rejectHunk(patchId, hunkId);
         defaultCodeLensProvider.refresh();
         vscode.window.showInformationMessage(`Forge: Rejected hunk ${hunkId}`);
