@@ -71,6 +71,23 @@ export function isQualifiedModelName(name: string | undefined): name is string {
   return typeof name === 'string' && /^[^/\s]+\/\S+$/.test(name);
 }
 
+/**
+ * SDK HTTP errors carry TrueForge's own reason in body.error.message, but their message
+ * starts with the class name ("UnprocessableEntityError"), which is all the user would see.
+ * Turn 4xx rejections into one sentence with that reason. 401/403/429 keep their own
+ * handling (bad credential, rate limit), and anything without a body passes through.
+ */
+export function explainTrueForgeError(err: unknown): unknown {
+  const e = err as { statusCode?: unknown; body?: { error?: { message?: unknown; param?: unknown }; message?: unknown } };
+  const status = typeof e?.statusCode === 'number' ? e.statusCode : undefined;
+  const raw = e?.body?.error?.message ?? e?.body?.message;
+  if (status === undefined || status === 401 || status === 403 || status === 429) return err;
+  if (typeof raw !== 'string' || !raw.trim()) return err;
+  const param = typeof e.body?.error?.param === 'string' && e.body.error.param ? `, ${e.body.error.param}` : '';
+  const reason = raw.trim().split('\n')[0].replace(/\.$/, '');
+  return new ForgeBaseError(`TrueForge rejected the request (HTTP ${status}${param}): ${reason}.`, `TRUEFORGE_HTTP_${status}`);
+}
+
 export interface ModelFallbackInfo {
   from: string;
   to: string;
@@ -204,7 +221,7 @@ export class TrueForgeClient {
       if (this.canFallBackFrom(targetModel)) {
         console.warn(`[Forge] Primary model '${targetModel}' failed after retries. Failing over to fallback: '${this.config.fallbackModel}'`);
         const fallbackModel = this.config.fallbackModel;
-        this.notifyFallback({ from: targetModel, to: fallbackModel, reason: getUserFacingErrorMessage(err, this.config.baseUrl) });
+        this.notifyFallback({ from: targetModel, to: fallbackModel, reason: getUserFacingErrorMessage(explainTrueForgeError(err), this.config.baseUrl) });
         return await withRetry(
           () => tryCreate(fallbackModel),
           { targetUrl: this.config.baseUrl }
@@ -280,7 +297,12 @@ export class TrueForgeClient {
     contextSummary?: string,
     options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    const sessionId = await this.createSession(undefined, undefined, options);
+    let sessionId: string;
+    try {
+      sessionId = await this.createSession(undefined, undefined, options);
+    } catch (err) {
+      throw explainTrueForgeError(err);
+    }
     const usedModel = this.activeModel;
     let primary: AsyncGenerator<ForgeEvent, void, unknown> | null = null;
     let startError: unknown = null;
@@ -288,7 +310,7 @@ export class TrueForgeClient {
       primary = await this.sendTurn(sessionId, prompt, contextSummary);
     } catch (err) {
       if (!this.canFallBackFrom(usedModel) || err instanceof SessionCancelledError) {
-        throw err;
+        throw explainTrueForgeError(err);
       }
       startError = err;
     }
@@ -303,7 +325,7 @@ export class TrueForgeClient {
     contextSummary?: string,
     options?: { preload?: boolean; compaction?: boolean }
   ): AsyncGenerator<ForgeEvent, void, unknown> {
-    let failure: string | null = startError ? getUserFacingErrorMessage(startError, this.config.baseUrl) : null;
+    let failure: string | null = startError ? getUserFacingErrorMessage(explainTrueForgeError(startError), this.config.baseUrl) : null;
 
     if (primary) {
       let sawToolCall = false;
@@ -324,8 +346,8 @@ export class TrueForgeClient {
         }
       } catch (err) {
         const recoverable = !sawToolCall && !this.sessionManager.isCancelled() && this.canFallBackFrom(usedModel);
-        if (!recoverable) throw err;
-        failure = getUserFacingErrorMessage(err, this.config.baseUrl);
+        if (!recoverable) throw explainTrueForgeError(err);
+        failure = getUserFacingErrorMessage(explainTrueForgeError(err), this.config.baseUrl);
       }
     }
 
@@ -338,8 +360,12 @@ export class TrueForgeClient {
       text: `\n[Forge] Model ${usedModel} failed (${failure}) Switched to fallback model ${fallbackModel}.\n`,
       timestamp: Date.now()
     };
-    const sessionId = await this.createSession(fallbackModel, undefined, options);
-    yield* await this.sendTurn(sessionId, prompt, contextSummary);
+    try {
+      const sessionId = await this.createSession(fallbackModel, undefined, options);
+      yield* await this.sendTurn(sessionId, prompt, contextSummary);
+    } catch (err) {
+      throw explainTrueForgeError(err);
+    }
   }
 
   public getAbortController(): AbortController | null {
@@ -616,10 +642,12 @@ export class TrueForgeClient {
     }
     this.abortController = new AbortController();
     const sdk = await this.getSdk();
-    const stream = await sdk.sessions.createTurnStream(
-      sessionId,
-      this.approvals.buildResumeTurnRequest(decisions)
-    );
+    let stream;
+    try {
+      stream = await sdk.sessions.createTurnStream(sessionId, this.approvals.buildResumeTurnRequest(decisions));
+    } catch (err) {
+      throw explainTrueForgeError(err);
+    }
     return this._adaptStream(stream);
   }
 
