@@ -43,5 +43,6 @@ export type WebviewOutgoingMessage =
     }
   | { type: 'budget_update'; budget: BudgetState }
   | { type: 'approval_required'; requestId: string; toolName: string; args: Record<string, unknown> }
+  | { type: 'run_started' }
   | { type: 'run_completed'; status: 'completed' | 'cancelled' | 'failed' }
   | { type: 'error'; message: string };

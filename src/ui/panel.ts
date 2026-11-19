@@ -8,6 +8,8 @@ import { ContextLedger, defaultContextLedger } from '../context/ledger';
 import { getUserFacingErrorMessage } from '../shared/errors';
 import { ContextEntry } from '../shared/types';
 import { ForgeEvent } from '../shared/events';
+import { buildMentionContext } from '../context/mentions';
+import { WorkspaceManager } from '../mcp/workspace';
 
 let vscodeModule: typeof vscodeTypes | undefined;
 try {
@@ -27,10 +29,12 @@ export class AgentPanelProvider {
     public readonly extensionUri?: vscodeTypes.Uri,
     trueforgeClient: TrueForgeClient = defaultTrueForgeClient,
     public readonly patchStore: PatchStore = defaultPatchStore,
-    contextLedger: ContextLedger = defaultContextLedger
+    contextLedger: ContextLedger = defaultContextLedger,
+    workspaceManager?: WorkspaceManager
   ) {
     this.trueforgeClient = trueforgeClient;
     this.contextLedger = contextLedger;
+    this.workspaceManager = workspaceManager;
 
     this.contextLedger.onContextUpdate((_entry, ledger) => {
       this.syncContextLedger(ledger);
@@ -129,7 +133,20 @@ export class AgentPanelProvider {
       this.postMessage({ type: 'budget_update', budget: { maxTokens: 12000, usedTokens: 0, maxCostUsd: 1, usedCostUsd: 0, maxIterations: 20, currentIteration: 1 } });
 
       this.accumulatedContext = [];
-      const stream = await this.trueforgeClient.runTaskB(prompt);
+      this.postMessage({ type: 'run_started' });
+
+      // Explicit @file / @symbol mentions become context; with none, the raw prompt goes as typed.
+      this.workspaceManager ??= new WorkspaceManager();
+      const mentions = await buildMentionContext(prompt, this.workspaceManager, this.contextLedger);
+      for (const miss of mentions.unresolved) {
+        this.postMessage({ type: 'error', message: `${miss.mention}: ${miss.reason}` });
+      }
+      if (mentions.entries.length > 0) {
+        this.accumulatedContext.push(...mentions.entries);
+        this.postMessage({ type: 'context_update', entries: [...this.accumulatedContext] });
+      }
+
+      const stream = await this.trueforgeClient.runTaskB(mentions.prompt, mentions.contextSummary || undefined);
       await this.consumeStream(stream);
     } catch (err: any) {
       const msg = getUserFacingErrorMessage(err);
@@ -139,6 +156,7 @@ export class AgentPanelProvider {
   }
 
   private accumulatedContext: ContextEntry[] = [];
+  private workspaceManager?: WorkspaceManager;
 
   /**
    * Render one TrueForge event stream (a first turn or a resumed approval turn)
