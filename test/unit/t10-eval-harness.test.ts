@@ -144,8 +144,8 @@ describe('T10: Real Evaluation Harness & Machine-Scored Rubric', () => {
         }
       ];
 
-      const row = computeMatrixRow('Claude 3.5 Sonnet', 'strong_hosted', runs);
-      expect(row.modelName).toBe('Claude 3.5 Sonnet');
+      const row = computeMatrixRow('GPT-4o mini', 'strong_hosted', runs);
+      expect(row.modelName).toBe('GPT-4o mini');
       expect(row.totalRuns).toBe(6);
       expect(row.passRate).toBe(83); // 5/6 = 83%
       expect(row.medianLatencyMs).toBe(2900); // median of [1200, 1400, 1800, 4000, 4200, 4500]

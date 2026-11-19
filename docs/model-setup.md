@@ -6,7 +6,7 @@ TrueForge abstracts model provider configurations behind its local proxy daemon:
 1. **Local Ollama / Llama.cpp**:
    - Endpoint: `http://localhost:11434/v1`
    - Model: e.g. `deepseek-coder:6.7b` or `qwen2.5-coder:7b`
-2. **OpenAI / Claude / Gemini (via TrueForge)**:
+2. **OpenAI / Gemini / other hosted providers (via TrueForge)**:
    - Configure credentials within TrueForge server configuration (`~/.trueforge/config.json`).
    - The VS Code extension does **not** store or manage API keys.
 

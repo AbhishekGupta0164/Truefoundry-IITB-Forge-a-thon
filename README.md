@@ -329,7 +329,7 @@ License: MIT (see `LICENSE`).
 
 | Card | Task Description | Protected Points | Implementation Details |
 |---|---|---|---|
-| **T0** | Reset TrueForge & SDK pinning | Core Infrastructure | Pinned `@truefoundry/trueforge-sdk` v0.184.1 + Gemini/Ollama/Claude provider config |
+| **T0** | Reset TrueForge & SDK pinning | Core Infrastructure | Pinned `@truefoundry/trueforge-sdk` v0.184.1 + Gemini/Ollama/OpenAI provider config |
 | **T1** | Remove test fixtures, make verification real | Credibility | Workspace cleanliness and AST verification against live repository |
 | **T2** | Route Task A through TrueForge client | A1, B4 | Direct SDK integration replacing hardcoded mock transformers |
 | **T3** | Context ledger and live context map | B1 (+5) | `ContextLedger` deduplicates repeat queries (0-cost hits) and records why files were searched |
