@@ -81,6 +81,12 @@ export class Uri {
   static file(f: string) {
     return new Uri(f, 'file');
   }
+  static joinPath(base: Uri, ...segments: string[]) {
+    return new Uri([base.fsPath, ...segments].join('/').replace(/\/+/g, '/'), base.scheme);
+  }
+  toString() {
+    return `${this.scheme}://${this.fsPath}`;
+  }
 }
 
 export class Range {

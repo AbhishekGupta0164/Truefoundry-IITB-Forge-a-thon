@@ -19,14 +19,22 @@ try {
   // Running outside VS Code
 }
 
-export class AgentPanelProvider {
+/** Swap the vscode API (tests run outside VS Code, where require('vscode') is unavailable). */
+export function setPanelVscodeApi(api: typeof vscodeTypes | undefined): void {
+  vscodeModule = api;
+}
+
+export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
   public static readonly viewType = 'forge.agentPanel';
+  /** Chat view in the Forge Agent side bar (contributes.views in package.json). */
+  public static readonly sidebarViewId = 'forge.agentView';
   private panel?: vscodeTypes.WebviewPanel;
+  private view?: vscodeTypes.WebviewView;
   private messageHandlers: ((msg: WebviewIncomingMessage) => void)[] = [];
   private trueforgeClient: TrueForgeClient;
   public readonly contextLedger: ContextLedger;
   constructor(
-    public readonly extensionUri?: vscodeTypes.Uri,
+    public extensionUri?: vscodeTypes.Uri,
     trueforgeClient: TrueForgeClient = defaultTrueForgeClient,
     public readonly patchStore: PatchStore = defaultPatchStore,
     contextLedger: ContextLedger = defaultContextLedger,
@@ -83,42 +91,72 @@ export class AgentPanelProvider {
     }
   }
 
-  public show(): void {
-    if (!vscodeModule?.window?.createWebviewPanel) {
+  /** Set once on activation so the webview can load dist/webview.js and dist/styles.css. */
+  public setExtensionUri(uri: vscodeTypes.Uri): void {
+    this.extensionUri = uri;
+  }
+
+  private distRoots(): vscodeTypes.Uri[] {
+    return this.extensionUri && vscodeModule ? [vscodeModule.Uri.joinPath(this.extensionUri, 'dist')] : [];
+  }
+
+  /** Wire a webview (side bar view or editor panel) to this provider. */
+  private attachWebview(webview: vscodeTypes.Webview): void {
+    webview.options = { enableScripts: true, localResourceRoots: this.distRoots() };
+    webview.html = this.getHtml(webview);
+    webview.onDidReceiveMessage(async (msg: WebviewIncomingMessage) => {
+      for (const handler of this.messageHandlers) {
+        handler(msg);
+      }
+      await this.handleIncomingMessage(msg);
+    });
+  }
+
+  /** Called by VS Code when the Forge Agent side bar view is first shown. */
+  public resolveWebviewView(webviewView: vscodeTypes.WebviewView): void {
+    this.view = webviewView;
+    this.attachWebview(webviewView.webview);
+    webviewView.onDidDispose(() => {
+      this.view = undefined;
+    });
+    this.syncContextLedger();
+  }
+
+  /**
+   * Show the agent chat. Prefers the side bar view (the user can drag it to the right-hand
+   * Secondary Side Bar, Cursor-style); falls back to an editor-side panel if the view is
+   * not available.
+   */
+  public async show(): Promise<void> {
+    if (!vscodeModule?.window) {
       return;
+    }
+    if (this.view) {
+      this.view.show(false);
+      return;
+    }
+    try {
+      await vscodeModule.commands.executeCommand(`${AgentPanelProvider.sidebarViewId}.focus`);
+      if (this.view) return;
+    } catch {
+      // view not contributed in this host: use an editor panel instead
     }
 
     if (this.panel) {
       this.panel.reveal();
       return;
     }
-
-    const distUri = this.extensionUri && vscodeModule ? vscodeModule.Uri.joinPath(this.extensionUri, 'dist') : undefined;
-
+    if (!vscodeModule.window.createWebviewPanel) {
+      return;
+    }
     this.panel = vscodeModule.window.createWebviewPanel(
       AgentPanelProvider.viewType,
       'Forge Agent',
       vscodeModule.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: distUri ? [distUri] : []
-      }
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: this.distRoots() }
     );
-
-    this.panel.webview.html = this.getHtml(this.panel.webview);
+    this.attachWebview(this.panel.webview);
     this.syncContextLedger();
-
-    this.panel.webview.onDidReceiveMessage(async (msg: WebviewIncomingMessage) => {
-      // Execute any registered custom handlers
-      for (const handler of this.messageHandlers) {
-        handler(msg);
-      }
-
-      // Handle standard webview commands
-      await this.handleIncomingMessage(msg);
-    });
-
     this.panel.onDidDispose(() => {
       this.panel = undefined;
     });
@@ -330,6 +368,7 @@ export class AgentPanelProvider {
   }
 
   public postMessage(msg: WebviewOutgoingMessage): void {
+    this.view?.webview?.postMessage(msg);
     this.panel?.webview?.postMessage(msg);
   }
 

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { MCPAuthenticator } from './mcp/auth';
 import { MCPServerManager } from './mcp/server';
 import { defaultInlineEditController } from './ui/inline-edit';
-import { defaultAgentPanel } from './ui/panel';
+import { AgentPanelProvider, defaultAgentPanel } from './ui/panel';
 import { defaultCancelManager } from './review/cancel';
 import { defaultUndoManager } from './review/undo';
 import { defaultCodeLensProvider } from './review/codelens';
@@ -132,9 +132,17 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Agent Webview Panel
-  const openPanelCmd = vscode.commands.registerCommand('forge.openPanel', () => {
-    defaultAgentPanel.show();
+  // Agent chat: a side bar view (Forge Agent icon in the activity bar; drag it to the
+  // right-hand Secondary Side Bar for a Cursor-style layout). The webview loads its
+  // script and styles from <extension>/dist, so it needs the extension URI.
+  defaultAgentPanel.setExtensionUri(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(AgentPanelProvider.sidebarViewId, defaultAgentPanel, {
+      webviewOptions: { retainContextWhenHidden: true }
+    })
+  );
+  const openPanelCmd = vscode.commands.registerCommand('forge.openPanel', async () => {
+    await defaultAgentPanel.show();
   });
 
   // Tell the user when a run switched to the fallback model (Task C resilience)

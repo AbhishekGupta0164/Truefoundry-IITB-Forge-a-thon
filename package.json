@@ -23,7 +23,7 @@
       },
       {
         "command": "forge.openPanel",
-        "title": "Forge: Open Agent Panel"
+        "title": "Forge: Open Agent Chat"
       },
       {
         "command": "forge.cancel",
@@ -50,6 +50,25 @@
         "title": "Forge: Self-Test"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "forge-agent",
+          "title": "Forge Agent",
+          "icon": "media/forge-agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "forge-agent": [
+        {
+          "type": "webview",
+          "id": "forge.agentView",
+          "name": "Agent",
+          "contextualTitle": "Forge Agent"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "forge.inlineEdit",
