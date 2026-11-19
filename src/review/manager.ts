@@ -8,6 +8,7 @@
 
 import * as fs from 'fs';
 import { locateHunk } from './apply';
+import { PatchStore, defaultPatchStore } from './store';
 import type * as vscodeTypes from 'vscode';
 import { ReviewPatch, ReviewHunk } from '../shared/types';
 import { StaleHunkError } from '../shared/errors';
@@ -30,8 +31,21 @@ export class ReviewManager {
   constructor(
     private readonly workspaceManager: WorkspaceManager = new WorkspaceManager(),
     private readonly undoManager: UndoManager = defaultUndoManager,
-    private readonly statusBar: ForgeStatusBar = defaultStatusBar
+    private readonly statusBar: ForgeStatusBar = defaultStatusBar,
+    private readonly patchStore: PatchStore = defaultPatchStore
   ) {}
+
+  /**
+   * Patches proposed over MCP (propose_edit / propose_patch) are staged in the PatchStore.
+   * Adopt them here, by reference, so CodeLens Accept / Reject can review them and the
+   * applied state stays shared with apply_patch_hunk.
+   */
+  private adoptFromStore(patchId: string): ReviewPatch | undefined {
+    const staged = this.patchStore.getPatch(patchId);
+    if (!staged) return undefined;
+    this.stagePatch(staged as ReviewPatch);
+    return this.patches.get(patchId);
+  }
 
   public setActiveTaskId(taskId: string): void {
     this.activeTaskId = taskId;
@@ -59,15 +73,18 @@ export class ReviewManager {
   }
 
   public getPatch(patchId: string): ReviewPatch | undefined {
-    return this.patches.get(patchId);
+    return this.patches.get(patchId) ?? this.adoptFromStore(patchId);
   }
 
   public getAllPatches(): ReviewPatch[] {
+    for (const staged of this.patchStore.getAllPatches()) {
+      if (!this.patches.has(staged.id)) this.adoptFromStore(staged.id);
+    }
     return Array.from(this.patches.values());
   }
 
   public getHunk(patchId: string, hunkId: string): { patch: ReviewPatch; hunk: ReviewHunk } | undefined {
-    const patch = this.patches.get(patchId);
+    const patch = this.getPatch(patchId);
     if (!patch) return undefined;
     const hunk = patch.hunks.find((h) => h.id === hunkId);
     if (!hunk) return undefined;
@@ -148,7 +165,7 @@ export class ReviewManager {
     if (hunk.status === 'rejected') {
       throw new Error(`Cannot accept previously rejected hunk ${hunkId}`);
     }
-    if (hunk.status === 'applied') {
+    if (hunk.status === 'applied' || hunk.applied) {
       return { success: true, message: `Hunk ${hunkId} already applied` };
     }
 
