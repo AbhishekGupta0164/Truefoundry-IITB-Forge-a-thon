@@ -26,9 +26,12 @@ fi
 echo "Activating virtualenv and installing dependencies..."
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -e . pytest
+# Flask 3.1.3 pins pytest 8.4.2 in uv.lock; pytest 9 removed _pytest.monkeypatch.notset,
+# which tests/test_cli.py imports, so an unpinned pytest breaks the Task B check.
+pip install -e . "pytest==8.4.2" python-dotenv asgiref
 
-echo "Running baseline pytest..."
-pytest tests/test_basic.py || echo "Baseline test run completed"
+echo "Running baseline checks..."
+pytest tests/test_cli.py -q
+FLASK_DEBUG=off python -c "from flask.helpers import get_debug_flag; print('Task A baseline (stock Flask prints True):', get_debug_flag())"
 
 echo "=== Flask setup complete ==="

@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'fs';
+import { locateHunk } from './apply';
 import type * as vscodeTypes from 'vscode';
 import { ReviewPatch, ReviewHunk } from '../shared/types';
 import { StaleHunkError } from '../shared/errors';
@@ -99,12 +100,7 @@ export class ReviewManager {
         .filter((l) => l.startsWith(' ') || l.startsWith('-'))
         .map((l) => l.slice(1));
 
-      const startIdx = Math.max(0, hunk.oldStart - 1);
-      const slice = currentLines.slice(startIdx, startIdx + expectedOldLines.length);
-
-      const matches = expectedOldLines.length === 0 ||
-        (slice.length === expectedOldLines.length &&
-          expectedOldLines.every((exp, idx) => slice[idx] === exp));
+      const matches = locateHunk(currentLines, expectedOldLines, Math.max(0, hunk.oldStart - 1)) !== -1;
 
       if (!matches) {
         return {
@@ -120,12 +116,8 @@ export class ReviewManager {
       .filter((l) => l.startsWith(' ') || l.startsWith('-'))
       .map((l) => l.slice(1));
 
-    const startIdx = Math.max(0, hunk.oldStart - 1);
-    const slice = currentLines.slice(startIdx, startIdx + expectedOldLines.length);
-
     if (expectedOldLines.length > 0) {
-      const directMatch = slice.length === expectedOldLines.length &&
-        expectedOldLines.every((exp, idx) => slice[idx] === exp);
+      const directMatch = locateHunk(currentLines, expectedOldLines, Math.max(0, hunk.oldStart - 1)) !== -1;
 
       if (!directMatch) {
         return {
@@ -189,7 +181,9 @@ export class ReviewManager {
       }
     }
 
-    const startIdx = Math.max(0, hunk.oldStart - 1);
+    // Earlier hunks of the same patch may have moved this one (checkStale already confirmed it is there).
+    const located = locateHunk(fileLines, expectedOldLines, Math.max(0, hunk.oldStart - 1));
+    const startIdx = located === -1 ? Math.max(0, hunk.oldStart - 1) : located;
     const count = hunk.oldLines > 0 ? hunk.oldLines : expectedOldLines.length;
 
     const updatedLines = [
@@ -230,9 +224,9 @@ export class ReviewManager {
       patchId,
       hunkId,
       file: absPath,
-      oldStart: hunk.oldStart,
+      oldStart: startIdx + 1,
       oldLines: count,
-      newStart: hunk.newStart,
+      newStart: startIdx + 1,
       newLines: replacementLines.length,
       originalLines: expectedOldLines,
       replacementLines,

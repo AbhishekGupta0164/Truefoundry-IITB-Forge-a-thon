@@ -63,67 +63,88 @@ export function applyScopeGuardToHunks(hunks: Hunk[], selection?: SelectionRange
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
+  /** Non-blocking notes, e.g. that no Python interpreter was found. */
+  warnings?: string[];
+}
+
+/** Locate scripts/check_py.py next to the extension, not relative to the process cwd. */
+function findCheckScript(): string | undefined {
+  const candidates = [
+    path.resolve(__dirname, '..', 'scripts', 'check_py.py'), // dist/extension.js -> <ext>/scripts
+    path.resolve(__dirname, '..', '..', 'scripts', 'check_py.py') // src/review/validate.ts -> <repo>/scripts
+  ];
+  return candidates.find((c) => fs.existsSync(c));
 }
 
 /**
- * Validates Python code using scripts/check_py.py or direct python3 AST execution.
+ * Python interpreters to try, best first: the workspace's own virtualenv (so the project's
+ * installed packages resolve), then python3 / python from PATH.
  */
-export function validatePythonSource(source: string, workspaceRoot?: string): ValidationResult {
-  const scriptPath = path.resolve(workspaceRoot || process.cwd(), 'scripts', 'check_py.py');
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+function pythonCandidates(workspaceRoot?: string): string[] {
+  const out: string[] = [];
+  if (workspaceRoot) {
+    for (const venv of ['.venv', 'venv']) {
+      const bin = process.platform === 'win32'
+        ? path.join(workspaceRoot, venv, 'Scripts', 'python.exe')
+        : path.join(workspaceRoot, venv, 'bin', 'python');
+      if (fs.existsSync(bin)) out.push(bin);
+    }
+  }
+  out.push(...(process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python']));
+  return out;
+}
 
-  try {
-    if (fs.existsSync(scriptPath)) {
-      let output: string;
-      try {
-        output = execFileSync(pythonCmd, [scriptPath], {
-          input: source,
-          encoding: 'utf-8',
-          timeout: 5000
-        });
-      } catch (err: any) {
-        // If primary python command failed with ENOENT, try fallback command
-        const fallbackCmd = pythonCmd === 'python' ? 'python3' : 'python';
-        output = execFileSync(fallbackCmd, [scriptPath], {
-          input: source,
-          encoding: 'utf-8',
-          timeout: 5000
-        });
-      }
+interface RunResult { stdout: string; stderr: string; status: number }
 
-      const parsed = JSON.parse(output);
-      const errors = Array.isArray(parsed.errors)
-        ? parsed.errors.map((e: any) => typeof e === 'string' ? e : e.message || JSON.stringify(e))
-        : [];
+/** Run the first interpreter that exists. Only a missing executable moves on to the next one. */
+function runPython(args: string[], input: string, workspaceRoot?: string): RunResult | null {
+  for (const cmd of pythonCandidates(workspaceRoot)) {
+    try {
+      const stdout = execFileSync(cmd, args, { input, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+      return { stdout, stderr: '', status: 0 };
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') continue;
       return {
-        valid: parsed.valid ?? (errors.length === 0),
-        errors
+        stdout: String(err?.stdout ?? ''),
+        stderr: String(err?.stderr ?? err?.message ?? ''),
+        status: typeof err?.status === 'number' ? err.status : 1
       };
     }
-
-    // Fallback: run python -c with ast.parse
-    try {
-      execFileSync(pythonCmd, ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], {
-        input: source,
-        encoding: 'utf-8',
-        timeout: 5000
-      });
-    } catch {
-      const fallbackCmd = pythonCmd === 'python' ? 'python3' : 'python';
-      execFileSync(fallbackCmd, ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], {
-        input: source,
-        encoding: 'utf-8',
-        timeout: 5000
-      });
-    }
-    return { valid: true, errors: [] };
-  } catch (err: any) {
-    const errorMsg = err.stderr ? String(err.stderr).trim() : err.message;
-    return {
-      valid: false,
-      errors: [errorMsg || 'Syntax error in Python source']
-    };
   }
+  return null;
+}
+
+/**
+ * Validates Python source: syntax, plus phantom-import detection for imports the edit adds.
+ *
+ * @param source        the full file content after the edit
+ * @param workspaceRoot the workspace the file belongs to (its virtualenv is used if present)
+ * @param baseline      the file content before the edit; imports it already had are not re-checked
+ */
+export function validatePythonSource(source: string, workspaceRoot?: string, baseline?: string): ValidationResult {
+  const script = findCheckScript();
+  const result = script
+    ? runPython([script, '--json-stdin'], JSON.stringify({ source, baseline: baseline ?? null }), workspaceRoot)
+    : runPython(['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], source, workspaceRoot);
+
+  if (result === null) {
+    return { valid: true, errors: [], warnings: ['No Python interpreter found; Python syntax check skipped.'] };
+  }
+
+  if (script) {
+    try {
+      const parsed = JSON.parse(result.stdout);
+      const errors: string[] = Array.isArray(parsed.errors)
+        ? parsed.errors.map((e: any) => (typeof e === 'string' ? e : e.line ? `line ${e.line}: ${e.message}` : e.message || JSON.stringify(e)))
+        : [];
+      return { valid: parsed.valid ?? errors.length === 0, errors };
+    } catch {
+      return { valid: false, errors: [result.stderr.trim() || 'Python check failed without a result'] };
+    }
+  }
+  return result.status === 0
+    ? { valid: true, errors: [] }
+    : { valid: false, errors: [result.stderr.trim().split('\n').pop() || 'Syntax error in Python source'] };
 }
 
 /**
@@ -137,7 +158,8 @@ export async function validateFile(filePath: string, workspaceRoot?: string): Pr
   const content = fs.readFileSync(filePath, 'utf-8');
 
   if (ext === '.py') {
-    return validatePythonSource(content, workspaceRoot);
+    // After accept the edit is already reviewed; check syntax, not imports the file already had.
+    return validatePythonSource(content, workspaceRoot, content);
   }
 
   // Non-python files are considered valid if read successfully

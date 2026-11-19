@@ -153,8 +153,13 @@ export function registerAllTools(
     'Prepare an unambiguous search-and-replace edit, compute diff server-side, and stage in memory without touching disk.',
     {
       path: z.string().describe('Workspace-relative path of target file'),
-      old_str: z.string().describe('Exact unique string in the file to be replaced'),
-      new_str: z.string().describe('Replacement string'),
+      old_str: z.string().optional().describe('Exact unique string in the file to be replaced (single edit)'),
+      new_str: z.string().optional().describe('Replacement string (single edit)'),
+      edits: z
+        .array(z.object({ old_str: z.string(), new_str: z.string() }))
+        .optional()
+        .describe('Several edits to the same file, applied in order; use instead of old_str/new_str'),
+      reason: z.string().optional().describe('Why this change is needed'),
       summary: z.string().optional().describe('Summary of the proposed edit')
     },
     { readOnlyHint: false, destructiveHint: false },

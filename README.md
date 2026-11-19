@@ -235,8 +235,10 @@ git fetch --tags
 git checkout 22d92470
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]" pytest
+pip install -e . "pytest==8.4.2" python-dotenv asgiref
 ```
+
+Pin pytest to 8.4.2 (the version in Flask's `uv.lock`). pytest 9 removed `_pytest.monkeypatch.notset`, which `tests/test_cli.py` imports, so an unpinned install fails Task B's check at import time. With the pin, stock Flask gives `58 passed`.
 
 Organizer checks (after a *successful* agent run + Accept):
 
