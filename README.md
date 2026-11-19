@@ -148,7 +148,7 @@ Retrieval order (documented in `docs/context-strategy.md`): `@file` / `@symbol` 
 | SDK | `@truefoundry/trueforge-sdk` `^0.184.1` |
 | Daemon | `npx @truefoundry/trueforge@0.184.3 --port 8790` (`scripts/start-trueforge.sh`) |
 | Default URL | `forge.trueforgeUrl` → `http://localhost:8790` (`src/trueforge/config.ts`) |
-| Default model setting | `qwen2.5-coder:7b` (VS Code `forge.model`); eval harness lists Claude 3.5 Sonnet, Gemini 1.5 Flash, Llama 3.2 3B — **all via the same localhost proxy** |
+| Default model setting | `ollama/llama-3-2-3b` (VS Code `forge.model`, `provider/model`); fallback via `forge.fallbackModel`; the eval harness covers three tiers (strong hosted, free tier, local 3B), **all via the same localhost proxy** |
 | Temperature | `0` |
 | MCP attach | Session `mcpServers: [{ name: 'forge-workspace', requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command'] }]` |
 | Streaming | SDK turn stream mapped to `token` / `tool_call` / `tool_result` / `approval` / `error` / `done` |
@@ -156,7 +156,7 @@ Retrieval order (documented in `docs/context-strategy.md`): `@file` / `@symbol` 
 | Cancel | `sdk.sessions.cancel` + local `AbortSignal` |
 | Loopback policy | `NETWORK_POLICY_ENABLED=true`, `OUTBOUND_URL_ALLOWED_HOSTS=["localhost","127.0.0.1"]` |
 
-`agent-definition.json` sets `"preload": false` (deferred tool loading). **`TrueForgeClient.createSession` does not pass `preload: false`.** A spike (`spikes/verify-stage1.ts`) tests it; the production session path does not. There is **no automatic failover to a second configured model** — Task C’s 10-point anchor is not implemented. After retries the user sees the clear error and git stays clean (7-point anchor).
+`agent-definition.json` sets `"preload": false` (deferred tool loading). **`TrueForgeClient.createSession` does not pass `preload: false`.** A spike (`spikes/verify-stage1.ts`) tests it; the production session path does not. Automatic fallback: if a run on `forge.model` fails before any tool call, a new session on `forge.fallbackModel` replays the request with no user action (see `docs/model-setup.md`). Without a fallback configured, the user sees one clear error and git stays clean.
 
 No provider API keys live in this repo. `model.example.json` is a placeholder pointing at Ollama’s OpenAI-compatible port (`11434`), which is **not** what the extension calls by default (`8790`).
 
@@ -269,7 +269,8 @@ Settings:
 | --- | --- |
 | `forge.trueforgeUrl` | `http://localhost:8790` |
 | `forge.mcpPort` | `8765` |
-| `forge.model` | `qwen2.5-coder:7b` |
+| `forge.model` | `ollama/llama-3-2-3b` |
+| `forge.fallbackModel` | empty (set a second `provider/model` to enable automatic fallback) |
 | `forge.temperature` | `0` |
 
 ### Eval harness
@@ -313,7 +314,7 @@ License: MIT (see `LICENSE`).
 1. **Live Tasks A/B were not re-run in this evaluation** because TrueForge would not start (migration error) and Flask still has stock 3.1.3 behavior.
 2. **Eval harness stored results are all FAIL** (proxy down). Do not cite `eval/results/` as a pass table.
 3. **Task A has a canned local rewriter** (`transformGetDebugFlag`) used in tests. That is not the production inline-edit path, but it can inflate a demo if someone wires it back.
-4. **No second-model fallback.** Dead port → 3 retries → one sentence. Workspace unchanged. Full 10-point Task C anchor is not met.
+4. **Fallback only before the first tool call.** A model failure after the agent has started reading or proposing is reported, not replayed on the fallback model.
 5. **Cancel does not auto-revert already accepted hunks.** Use `Forge: Undo Whole Task`. That is the 7-point streaming/cancel anchor, not 10.
 6. **Context map is not fed from MCP reads.** Budget and “which files and why” are not proven visible on Task B.
 7. **`preload: false` is not applied in `createSession`.** Deferred tool loading is a spike, not the live session.

@@ -16,7 +16,7 @@ import { ApprovalMatcher, SdkToolApprovalEvent } from './approvals';
 import { LoopGuard } from './loop-guard';
 import { SessionStateManager, defaultSessionStateManager } from './session-state';
 import { StreamReconnector } from './reconnect';
-import { SessionCancelledError, LoopGuardError } from '../shared/errors';
+import { SessionCancelledError, LoopGuardError, ForgeBaseError, getUserFacingErrorMessage } from '../shared/errors';
 
 export interface InlineEditTaskParams {
   filePath: string;
@@ -66,6 +66,17 @@ export function parseToolArguments(raw: string | undefined): Record<string, unkn
   }
 }
 
+/** TrueForge addresses models as "<provider-account>/<model>", e.g. "ollama/qwen2-5-coder-7b". */
+export function isQualifiedModelName(name: string | undefined): name is string {
+  return typeof name === 'string' && /^[^/\s]+\/\S+$/.test(name);
+}
+
+export interface ModelFallbackInfo {
+  from: string;
+  to: string;
+  reason: string;
+}
+
 export class TrueForgeClient {
   private config: TrueForgeConfig;
   private sdk: TrueForgeInstance = null;
@@ -76,6 +87,8 @@ export class TrueForgeClient {
   private abortController: AbortController | null = null;
   private toolCalls = new Map<string, ToolCallInfo>();
   private awaitingApproval = new Map<string, ApprovalInput | null>();
+  private fallbackListeners = new Set<(info: ModelFallbackInfo) => void>();
+  private activeModel = '';
 
   constructor(
     configOverride?: Partial<TrueForgeConfig>,
@@ -120,6 +133,12 @@ export class TrueForgeClient {
   ): Promise<string> {
     const targetModel = model ?? this.config.model;
     const preload = options.preload ?? false;
+    if (!isQualifiedModelName(targetModel)) {
+      throw new ForgeBaseError(
+        `Model "${targetModel}" must be "provider/model" exactly as configured in TrueForge (Settings > Models).`,
+        'MODEL_NAME_INVALID'
+      );
+    }
 
     const instructions = instructionsOverride ?? [
       'You are Forge Agent — an autonomous coding assistant embedded in VS Code.',
@@ -167,6 +186,7 @@ export class TrueForgeClient {
       });
 
       console.log(`[forge] session created id=${session.id} model=${modelName} preload=${preload}`);
+      this.activeModel = modelName;
       this.sessionManager.setSession(session.id);
       this.loopGuard.reset();
       this.toolCalls.clear();
@@ -181,10 +201,12 @@ export class TrueForgeClient {
         { targetUrl: this.config.baseUrl }
       );
     } catch (err) {
-      if (this.config.fallbackModel && this.config.fallbackModel !== targetModel) {
+      if (this.canFallBackFrom(targetModel)) {
         console.warn(`[Forge] Primary model '${targetModel}' failed after retries. Failing over to fallback: '${this.config.fallbackModel}'`);
+        const fallbackModel = this.config.fallbackModel;
+        this.notifyFallback({ from: targetModel, to: fallbackModel, reason: getUserFacingErrorMessage(err, this.config.baseUrl) });
         return await withRetry(
-          () => tryCreate(this.config.fallbackModel!),
+          () => tryCreate(fallbackModel),
           { targetUrl: this.config.baseUrl }
         );
       }
@@ -199,8 +221,6 @@ export class TrueForgeClient {
   public async runTaskA(
     params: InlineEditTaskParams
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    const sessionId = await this.createSession();
-
     const start = params.selectionRange.startLine;
     const end = params.selectionRange.endLine;
     const filePath = params.filePath;
@@ -208,7 +228,7 @@ export class TrueForgeClient {
 
     const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.`;
 
-    return await this.sendTurn(sessionId, prompt);
+    return this.runWithFallback(prompt);
   }
 
   /**
@@ -220,8 +240,106 @@ export class TrueForgeClient {
     contextSummary?: string,
     options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
+    return this.runWithFallback(rawRequest, contextSummary, options);
+  }
+
+  /** Subscribe to automatic primary -> fallback model switches. Returns an unsubscribe function. */
+  public onModelFallback(listener: (info: ModelFallbackInfo) => void): () => void {
+    this.fallbackListeners.add(listener);
+    return () => this.fallbackListeners.delete(listener);
+  }
+
+  /** Model used by the current session. */
+  public getActiveModel(): string {
+    return this.activeModel;
+  }
+
+  private notifyFallback(info: ModelFallbackInfo): void {
+    console.warn(`[forge] model fallback ${info.from} -> ${info.to}: ${info.reason}`);
+    for (const listener of this.fallbackListeners) {
+      listener(info);
+    }
+  }
+
+  private canFallBackFrom(model: string): boolean {
+    const fallback = this.config.fallbackModel;
+    return isQualifiedModelName(fallback) && fallback !== model;
+  }
+
+  /**
+   * Run one request on the primary model; if the turn fails before the agent made any
+   * tool call (unreachable endpoint, invalid key, provider error), start a fresh session
+   * on the configured fallback model and replay the same request, with no user action.
+   *
+   * Nothing is staged or written before the first tool call, so the switch cannot leave
+   * a half-applied change. A failure after tool calls, a cancel, or a loop-guard stop is
+   * reported as-is instead of being replayed.
+   */
+  public async runWithFallback(
+    prompt: string,
+    contextSummary?: string,
+    options?: { preload?: boolean; compaction?: boolean }
+  ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const sessionId = await this.createSession(undefined, undefined, options);
-    return await this.sendTurn(sessionId, rawRequest, contextSummary);
+    const usedModel = this.activeModel;
+    let primary: AsyncGenerator<ForgeEvent, void, unknown> | null = null;
+    let startError: unknown = null;
+    try {
+      primary = await this.sendTurn(sessionId, prompt, contextSummary);
+    } catch (err) {
+      if (!this.canFallBackFrom(usedModel) || err instanceof SessionCancelledError) {
+        throw err;
+      }
+      startError = err;
+    }
+    return this.fallbackStream(primary, startError, usedModel, prompt, contextSummary, options);
+  }
+
+  private async *fallbackStream(
+    primary: AsyncGenerator<ForgeEvent, void, unknown> | null,
+    startError: unknown,
+    usedModel: string,
+    prompt: string,
+    contextSummary?: string,
+    options?: { preload?: boolean; compaction?: boolean }
+  ): AsyncGenerator<ForgeEvent, void, unknown> {
+    let failure: string | null = startError ? getUserFacingErrorMessage(startError, this.config.baseUrl) : null;
+
+    if (primary) {
+      let sawToolCall = false;
+      try {
+        for await (const event of primary) {
+          if (event.type === 'tool_call') sawToolCall = true;
+          const recoverable =
+            event.type === 'error' &&
+            event.code !== 'LOOP_GUARD_TRIGGERED' &&
+            !sawToolCall &&
+            !this.sessionManager.isCancelled() &&
+            this.canFallBackFrom(usedModel);
+          if (recoverable) {
+            failure = event.message;
+            break;
+          }
+          yield event;
+        }
+      } catch (err) {
+        const recoverable = !sawToolCall && !this.sessionManager.isCancelled() && this.canFallBackFrom(usedModel);
+        if (!recoverable) throw err;
+        failure = getUserFacingErrorMessage(err, this.config.baseUrl);
+      }
+    }
+
+    if (failure === null) return;
+
+    const fallbackModel = this.config.fallbackModel;
+    this.notifyFallback({ from: usedModel, to: fallbackModel, reason: failure });
+    yield {
+      type: 'token',
+      text: `\n[Forge] Model ${usedModel} failed (${failure}) Switched to fallback model ${fallbackModel}.\n`,
+      timestamp: Date.now()
+    };
+    const sessionId = await this.createSession(fallbackModel, undefined, options);
+    yield* await this.sendTurn(sessionId, prompt, contextSummary);
   }
 
   public getAbortController(): AbortController | null {

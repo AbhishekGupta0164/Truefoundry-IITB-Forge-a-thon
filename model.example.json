@@ -1,5 +1,10 @@
 {
-  "baseUrl": "http://localhost:11434/v1",
-  "model": "your-model-name",
+  "_comment": "Models live in TrueForge (Settings > Models), never in this extension. Copy the exact provider/model names TrueForge lists into the VS Code settings forge.model and forge.fallbackModel. Use two different providers so one failing does not take down the other.",
+  "forge.model": "<provider-account>/<primary-model>",
+  "forge.fallbackModel": "<other-provider-account>/<fallback-model>",
+  "localExample": {
+    "trueforgeProvider": "ollama (OpenAI-compatible endpoint http://localhost:11434/v1)",
+    "forge.model": "ollama/llama-3-2-3b"
+  },
   "apiKey": ""
 }

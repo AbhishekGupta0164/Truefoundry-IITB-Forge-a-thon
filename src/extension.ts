@@ -137,6 +137,14 @@ export async function activate(context: vscode.ExtensionContext) {
     defaultAgentPanel.show();
   });
 
+  // Tell the user when a run switched to the fallback model (Task C resilience)
+  const fallbackSub = defaultTrueForgeClient.onModelFallback((info) => {
+    vscode.window.showWarningMessage(
+      `Forge: ${info.from} failed (${info.reason}) Switched to fallback model ${info.to}.`
+    );
+  });
+  context.subscriptions.push({ dispose: fallbackSub });
+
   // Wire cancellation callback to TrueForge client
   defaultCancelManager.onCancel(async () => {
     await defaultTrueForgeClient.cancel();

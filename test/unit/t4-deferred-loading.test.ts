@@ -49,7 +49,7 @@ describe('T4: Deferred tool loading in live session', () => {
     const client = new TrueForgeClient({ baseUrl: 'http://localhost:8790' });
     vi.spyOn(client, 'getSdk').mockResolvedValue(mockSdk);
 
-    await client.createSession('qwen2.5-coder:7b', undefined, { preload: true });
+    await client.createSession('ollama/qwen2-5-coder-7b', undefined, { preload: true });
 
     const mcpServers = capturedSessionPayload?.agent?.spec?.mcpServers;
     expect(mcpServers[0].preload).toBe(true);
@@ -59,7 +59,7 @@ describe('T4: Deferred tool loading in live session', () => {
     const client = new TrueForgeClient({ baseUrl: 'http://localhost:8790' });
     vi.spyOn(client, 'getSdk').mockResolvedValue(mockSdk);
 
-    await client.createSession('qwen2.5-coder:7b', undefined, { preload: true, compaction: true });
+    await client.createSession('ollama/qwen2-5-coder-7b', undefined, { preload: true, compaction: true });
 
     const spec = capturedSessionPayload?.agent?.spec;
     expect(spec.mcpServers[0].preload).toBe(true);
