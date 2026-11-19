@@ -1,8 +1,8 @@
 [
   {
-    "name": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
-    "provider": "anthropic",
-    "model": "anthropic/claude-3-5-sonnet",
+    "name": "GPT-4o mini (Strong Hosted Demo Model)",
+    "provider": "openai",
+    "model": "openai/gpt-4o-mini",
     "tier": "strong_hosted",
     "baseUrl": "http://localhost:8790"
   },

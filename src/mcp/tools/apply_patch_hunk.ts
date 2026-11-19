@@ -7,7 +7,7 @@ import { UndoManager, defaultUndoManager } from '../../review/undo';
 import { assertHunkApplicable } from '../../shared/validation';
 import { StaleHunkError } from '../../shared/errors';
 import { sanitizeToolOutput } from '../sanitize';
-import { applyHunkToContent } from '../../review/apply';
+import { applyHunkToContent, locateHunk } from '../../review/apply';
 
 let vscodeModule: typeof vscodeTypes | undefined;
 try {
@@ -147,16 +147,16 @@ export async function executeApplyPatchHunk(
   const oldLinesFromHunk = hunkDiffLines.filter(l => l.startsWith(' ') || l.startsWith('-')).map(l => l.slice(1));
   const newLinesFromHunk = hunkDiffLines.filter(l => l.startsWith(' ') || l.startsWith('+')).map(l => l.slice(1));
 
-  const startIdx = hunk.oldStart - 1;
-  for (let i = 0; i < oldLinesFromHunk.length; i++) {
-    const fileLine = fileLines[startIdx + i];
-    const expectedLine = oldLinesFromHunk[i];
-    if (fileLine !== undefined && fileLine.trim() !== expectedLine.trim()) {
-      throw new StaleHunkError(
-        hunk.id,
-        `Stale hunk detected: line ${startIdx + i + 1} content "${fileLine}" does not match expected "${expectedLine}"`
-      );
-    }
+  // Earlier hunks of the same patch may have moved this one; find its lines in the current file.
+  const startIdx = locateHunk(fileLines, oldLinesFromHunk, hunk.oldStart - 1);
+  if (startIdx === -1) {
+    const expectedIdx = hunk.oldStart - 1;
+    const firstDiff = oldLinesFromHunk.findIndex((line, i) => (fileLines[expectedIdx + i] ?? '').trim() !== line.trim());
+    const at = expectedIdx + Math.max(0, firstDiff);
+    throw new StaleHunkError(
+      hunk.id,
+      `Stale hunk detected: line ${at + 1} content "${fileLines[at] ?? ''}" does not match expected "${oldLinesFromHunk[Math.max(0, firstDiff)] ?? ''}"`
+    );
   }
 
   // Compute updated file content
@@ -200,9 +200,9 @@ export async function executeApplyPatchHunk(
     patchId: patch_id,
     hunkId: hunk_id,
     file: absPath,
-    oldStart: hunk.oldStart,
+    oldStart: startIdx + 1,
     oldLines: hunk.oldLines,
-    newStart: hunk.newStart,
+    newStart: startIdx + 1,
     newLines: newLinesFromHunk.length,
     originalLines: oldLinesFromHunk,
     replacementLines: newLinesFromHunk,

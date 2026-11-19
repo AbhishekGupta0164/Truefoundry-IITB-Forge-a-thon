@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { MCPAuthenticator } from './mcp/auth';
 import { MCPServerManager } from './mcp/server';
 import { defaultInlineEditController } from './ui/inline-edit';
-import { defaultAgentPanel } from './ui/panel';
+import { AgentPanelProvider, defaultAgentPanel } from './ui/panel';
 import { defaultCancelManager } from './review/cancel';
 import { defaultUndoManager } from './review/undo';
 import { defaultCodeLensProvider } from './review/codelens';
@@ -98,6 +98,13 @@ export async function activate(context: vscode.ExtensionContext) {
     'forge.acceptHunk',
     async (patchId: string, hunkId: string) => {
       try {
+        // If the agent is paused waiting to apply this hunk, approve the TrueForge call
+        // so the write happens through apply_patch_hunk on the harness side.
+        if (await defaultAgentPanel.decideHunkApproval(patchId, hunkId, 'accept')) {
+          defaultCodeLensProvider.refresh();
+          vscode.window.showInformationMessage(`Forge: Approved hunk ${hunkId}`);
+          return;
+        }
         await defaultReviewManager.acceptHunk(patchId, hunkId);
         defaultCodeLensProvider.refresh();
         vscode.window.showInformationMessage(`Forge: Accepted hunk ${hunkId}`);
@@ -111,6 +118,11 @@ export async function activate(context: vscode.ExtensionContext) {
     'forge.rejectHunk',
     async (patchId: string, hunkId: string) => {
       try {
+        if (await defaultAgentPanel.decideHunkApproval(patchId, hunkId, 'reject')) {
+          defaultCodeLensProvider.refresh();
+          vscode.window.showInformationMessage(`Forge: Denied hunk ${hunkId}`);
+          return;
+        }
         defaultReviewManager.rejectHunk(patchId, hunkId);
         defaultCodeLensProvider.refresh();
         vscode.window.showInformationMessage(`Forge: Rejected hunk ${hunkId}`);
@@ -120,10 +132,26 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Agent Webview Panel
-  const openPanelCmd = vscode.commands.registerCommand('forge.openPanel', () => {
-    defaultAgentPanel.show();
+  // Agent chat: a side bar view (Forge Agent icon in the activity bar; drag it to the
+  // right-hand Secondary Side Bar for a Cursor-style layout). The webview loads its
+  // script and styles from <extension>/dist, so it needs the extension URI.
+  defaultAgentPanel.setExtensionUri(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(AgentPanelProvider.sidebarViewId, defaultAgentPanel, {
+      webviewOptions: { retainContextWhenHidden: true }
+    })
+  );
+  const openPanelCmd = vscode.commands.registerCommand('forge.openPanel', async () => {
+    await defaultAgentPanel.show();
   });
+
+  // Tell the user when a run switched to the fallback model (Task C resilience)
+  const fallbackSub = defaultTrueForgeClient.onModelFallback((info) => {
+    vscode.window.showWarningMessage(
+      `Forge: ${info.from} failed (${info.reason}) Switched to fallback model ${info.to}.`
+    );
+  });
+  context.subscriptions.push({ dispose: fallbackSub });
 
   // Wire cancellation callback to TrueForge client
   defaultCancelManager.onCancel(async () => {

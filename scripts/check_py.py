@@ -20,14 +20,33 @@ def is_builtin_or_installed_module(module_name):
     except Exception:
         return False
 
-def check_python_source(source_text, filename="<patch>", allowed_symbols=None):
+def collect_absolute_imports(source_text):
+    """Absolute module names imported by a source file (relative imports excluded)."""
+    try:
+        tree = ast.parse(source_text)
+    except SyntaxError:
+        return set()
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module)
+    return names
+
+
+def check_python_source(source_text, filename="<patch>", allowed_symbols=None, baseline_text=None):
     """
     Validates python code syntax and checks for phantom symbols:
     - SyntaxError is caught and returned.
-    - New imports must be installed or resolve against known symbols.
+    - New imports must be installed or resolve against known symbols. When baseline_text
+      (the file before the edit) is given, only imports the edit adds are checked, so a
+      file is never rejected for imports it already had.
+    - Relative imports (from .x import y) are package-local and are not resolved here.
     - Function calls must resolve to local scope, builtins, standard library, or known symbols.
     """
     errors = []
+    preexisting_imports = collect_absolute_imports(baseline_text) if baseline_text is not None else set()
     try:
         tree = ast.parse(source_text, filename=filename)
     except SyntaxError as e:
@@ -61,7 +80,9 @@ def check_python_source(source_text, filename="<patch>", allowed_symbols=None):
                 as_name = alias.asname or mod_name.split('.')[0]
                 self.scopes[-1].add(as_name)
                 self.imported_modules.add(mod_name)
-                # Phantom import check
+                # Phantom import check (only for imports the edit introduces)
+                if mod_name in preexisting_imports:
+                    continue
                 if not is_builtin_or_installed_module(mod_name) and mod_name not in known_symbols_set:
                     errors.append({
                         "line": node.lineno,
@@ -71,6 +92,11 @@ def check_python_source(source_text, filename="<patch>", allowed_symbols=None):
 
         def visit_ImportFrom(self, node):
             mod_name = node.module or ""
+            for alias in node.names:
+                self.scopes[-1].add(alias.asname or alias.name)
+            # Relative imports are resolved by the package itself; pre-existing imports are trusted.
+            if node.level > 0 or mod_name in preexisting_imports:
+                return
             mod_valid = is_builtin_or_installed_module(mod_name) or (mod_name in known_symbols_set)
             if not mod_valid:
                 errors.append({
@@ -78,9 +104,6 @@ def check_python_source(source_text, filename="<patch>", allowed_symbols=None):
                     "offset": node.col_offset,
                     "message": f"PhantomSymbolError: Cannot resolve from-import module '{mod_name}'"
                 })
-            for alias in node.names:
-                name = alias.asname or alias.name
-                self.scopes[-1].add(name)
 
         def visit_FunctionDef(self, node):
             self.scopes[-1].add(node.name)
@@ -128,24 +151,37 @@ def check_python_source(source_text, filename="<patch>", allowed_symbols=None):
     }
 
 if __name__ == "__main__":
-    symbols_arg = None
-    if len(sys.argv) > 1 and sys.argv[1].endswith(".json"):
-        try:
-            with open(sys.argv[1], "r", encoding="utf-8") as sf:
-                symbols_arg = json.load(sf)
-            code_file = sys.argv[2] if len(sys.argv) > 2 else None
-        except Exception:
-            code_file = sys.argv[1]
-    else:
-        code_file = sys.argv[1] if len(sys.argv) > 1 else None
+    import argparse
 
-    if code_file and code_file != "-":
-        with open(code_file, "r", encoding="utf-8") as f:
+    parser = argparse.ArgumentParser(description="Syntax and phantom-symbol check for Python source.")
+    parser.add_argument("code_file", nargs="?", default="-", help="file to check, or - for stdin")
+    parser.add_argument("--symbols", help="JSON file with a list of known symbol names")
+    parser.add_argument("--baseline", help="the file before the edit; only imports the edit adds are checked")
+    parser.add_argument("--json-stdin", action="store_true",
+                        help='read {"source": ..., "baseline": ...} from stdin (nothing is written to disk)')
+    args = parser.parse_args()
+
+    symbols_arg = None
+    if args.symbols:
+        with open(args.symbols, "r", encoding="utf-8") as sf:
+            symbols_arg = json.load(sf)
+
+    baseline = None
+    if args.json_stdin:
+        payload = json.loads(sys.stdin.read())
+        code = payload.get("source", "")
+        baseline = payload.get("baseline")
+    elif args.code_file != "-":
+        with open(args.code_file, "r", encoding="utf-8") as f:
             code = f.read()
     else:
         code = sys.stdin.read()
 
-    result = check_python_source(code, allowed_symbols=symbols_arg)
+    if args.baseline:
+        with open(args.baseline, "r", encoding="utf-8") as bf:
+            baseline = bf.read()
+
+    result = check_python_source(code, allowed_symbols=symbols_arg, baseline_text=baseline)
     print(json.dumps(result, indent=2))
     if not result["valid"]:
         sys.exit(1)

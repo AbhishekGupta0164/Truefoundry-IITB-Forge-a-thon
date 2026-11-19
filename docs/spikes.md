@@ -138,7 +138,7 @@ Provide a resilient edit engine that is forgiving on input (tolerant to model fo
 
 ### 1. Goal
 Provide a repeatable, machine-scored evaluation harness (`eval/run.ts`, `eval/rubric.ts`) that runs 3 iterations across 3 models:
-1. **Strong Hosted Model** (e.g., Claude 3.5 Sonnet)
+1. **Strong Hosted Model** (e.g., GPT-4o mini)
 2. **Hosted Free-Tier Model** (e.g., Gemini 1.5 Flash)
 3. **Local Evaluation Model** (e.g., Llama 3.2 3B)
 

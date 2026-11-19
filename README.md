@@ -41,7 +41,7 @@ Forge Agent is the editor half of the loop. TrueForge is the model half.
 | Surface | What happens |
 | --- | --- |
 | **Inline edit** (`Cmd+Alt+K` / `Ctrl+Alt+K`) | Selection + instruction go to a TrueForge session. The model is expected to call `propose_edit` over MCP. Hunks appear as CodeLens **Accept / Reject**. Disk is untouched until Accept. |
-| **Agent panel** | Raw prompt only — **no filenames injected**. The model must `search_text` / `read_file` / `find_related` / `propose_patch`. |
+| **Agent chat** (Forge Agent icon in the activity bar; drag it to the right-hand Secondary Side Bar for a Cursor-style layout) | Type a task and press Run. The prompt goes to TrueForge as typed; **no filenames are added** unless you write `@src/path/file.py` or `@symbol:name`. The model finds the code with `search_text` / `search_symbols` / `find_related` / `read_file` and proposes edits with `propose_edit`. Tokens, tool calls, the context map and approvals stream into the view; Cancel stops the run; Undo whole task reverts it. |
 | **Review** | Native `vscode.diff` (`forge-original:` / `forge-proposed:`), per-hunk CodeLens, stale-hunk denial, `Forge: Undo Whole Task` via inverse edits (not whole-file snapshots). |
 | **Cancel** | `Forge: Cancel Run` calls TrueForge `sessions.cancel`, discards unapplied hunks, and reports if any approved hunk was already applied. |
 | **MCP** | Loopback-only `127.0.0.1:8765/mcp`, bearer token in VS Code SecretStorage, workspace path confinement, allowlisted `run_terminal_command`. |
@@ -56,38 +56,20 @@ Safety invariants (also in `AGENTS.md`):
 
 ---
 
-## Results
+## Verification status
 
-Two layers of evidence exist. They **do not agree**. This README treats them separately.
+### Verified on 2026-11-19 (Linux, Node 22, Python 3.13)
 
-### Independently verified (this machine, 2026-11-17)
-
-| Check | Result |
-| --- | --- |
-| `npm run test:unit` | **186 passed / 30 files** (covers full suite: fault proxy, 3-tier matcher, eval rubric, big-repo stress tests, one-click launcher, cancel & undo, review engine, MCP, budget, routing) |
-| `npm run build` | **Clean build** via esbuild into `dist/extension.js` |
-| `npm run typecheck` | **Zero TypeScript errors** (`tsc --noEmit`) |
-| `npm run lint` | **Zero ESLint warnings or errors** across `src/` and `test/` |
-| `npm run package` | **Clean VSIX packaging** via `@vscode/vsce` (`forge-agent-0.1.0.vsix`, 35 files, ~562 KB) |
-| Flask checkout | `22d92470` (3.1.3), **clean working tree** |
-| Task A verification command on *current* Flask | `FLASK_DEBUG=off` → **`True`** (stock 3.1.3 treats only `0` / `false` / `no`). Task A is **not** left applied on disk. |
-| `pytest tests/test_cli.py -q` on Flask | **55 passed, 3 skipped** — clean baseline state |
-| Ollama `http://localhost:11434` | **Up**, model `llama3.2:3b` present |
-| Big repo stress tests (T11) | **Passed**: Symbol search <5s on 1000+ files, text search <5s, bounded heap (<512MB growth), 10 concurrent calls without deadlock |
-
-Could not independently re-run organizer Tasks A/B end-to-end against a live TrueForge session. Could not start the daemon here without mutating `~/.trueforge` (migration corruption). Task C behavior **is** covered by unit tests against a closed port (`http://127.0.0.1:9/v1`) and `BadCredentialError`.
-
-### Claimed demo numbers (submitter screenshot; not reproduced here)
-
-| Task | Claimed output | Claimed status |
+| Check | How | Result |
 | --- | --- | --- |
-| A Inline edit | `FLASK_DEBUG=off` → `False`; CodeLens review + rollback | PASS **1.2s, 85 tokens** |
-| B Agent mode | `pytest` 56 passed; `git diff` 3 files (`cli.py`, `test_cli.py`, `cli.rst`); secrets masked as `***` | PASS **3.4s, 3.1k tokens** (budget cap 12k) |
-| C Resilience | 3 retries with exponential backoff; message `Can't reach the model at http://127.0.0.1:9/v1. Check TrueForge settings.`; no stack traces; `git status --porcelain` empty | PASS **395ms, 0 tokens** |
+| Extension build and tests | fresh clone of `main`: `npm ci`, `npm run typecheck`, `npm run lint`, `npm run test:unit`, `npm run build` | 0 type errors, 0 lint problems, **37 test files, 247 passed, 2 skipped**, `dist/extension.js` + `dist/webview.js` built |
+| MCP tool chain on Flask 3.1.3 (`22d92470`) | the real MCP server on `127.0.0.1:8765` called by a real MCP client over Streamable HTTP with bearer auth. **No model:** a script issued the tool calls an agent would make | 33 / 33 checks. Task A: `FLASK_DEBUG=off` → `False` (and `OFF`, `n`, `N`, `no`, `0`, empty → `False`). Task B: 3 files changed, `pytest tests/test_cli.py -q` → 60 passed, `flask --help` lists `config`, `flask --app demo/app config` shows `SECRET_KEY` and `API_TOKEN` as `"***"`. Nothing written before apply; stale hunks denied; `../`, secret files, `.git`, `sh -c`, `>` and `git apply` rejected; no token → HTTP 401 |
+| Flask baseline | `pip install -e . "pytest==8.4.2" python-dotenv asgiref` | `pytest tests/test_cli.py -q` → 58 passed; stock `get_debug_flag()` with `FLASK_DEBUG=off` → `True` |
 
-**How to read this.** 85 tokens / 1.2s for Task A is consistent with a tiny completion *or* with the **local** `InlineEditController.generateReplacement()` transformer (hard-coded `get_debug_flag` rewrite used by unit tests). Production `trigger()` does **not** call that transformer; it calls `TrueForgeClient.runTaskA`. Treat 85 tok as **claimed**, not measured in this evaluation.
+### Not verified yet
 
-Task B’s jump from 55 → 56 pytest cases is exactly “one new test.” The three-file set is the right shape for the organizer prompt. It was not present on disk when judged.
+- **Tasks A, B and C end to end through a live TrueForge daemon with a model.** The daemon could not run in the test environment. The SDK event mapping, approval resume and model fallback are tested against the `@truefoundry/trueforge-sdk` v0.184.1 types with a fake SDK only.
+- **The agent chat inside a real VS Code window.** It was rendered in Chromium from `dist/webview.js`, driven by the real panel provider.
 
 ---
 
@@ -137,7 +119,7 @@ src/ui          inline-edit, webview (token stream, tool timeline, budget, appro
 
 Retrieval order (documented in `docs/context-strategy.md`): `@file` / `@symbol` mentions → repo map → `search_text` → bounded `read_file` → `find_related` (test/doc pairing).
 
-**Honest gap:** the webview has a context-map component, but `AgentPanelProvider` never posts `context_update`. Only a zeroed `budget_update` is sent at prompt start. File-choice “why” is therefore **not** visible in the panel unless you infer it from the tool timeline.
+The context map in the agent chat is fed from the same ledger the MCP tools write to: every `read_file`, `search_text`, `search_symbols` and `find_related` call is listed with its path, line range and the reason the model gave, plus skipped candidates and budget usage. `@file` / `@symbol` mentions appear there as "mentioned by the user".
 
 ---
 
@@ -148,7 +130,7 @@ Retrieval order (documented in `docs/context-strategy.md`): `@file` / `@symbol` 
 | SDK | `@truefoundry/trueforge-sdk` `^0.184.1` |
 | Daemon | `npx @truefoundry/trueforge@0.184.3 --port 8790` (`scripts/start-trueforge.sh`) |
 | Default URL | `forge.trueforgeUrl` → `http://localhost:8790` (`src/trueforge/config.ts`) |
-| Default model setting | `qwen2.5-coder:7b` (VS Code `forge.model`); eval harness lists Claude 3.5 Sonnet, Gemini 1.5 Flash, Llama 3.2 3B — **all via the same localhost proxy** |
+| Default model setting | `ollama/llama-3-2-3b` (VS Code `forge.model`, `provider/model`); fallback via `forge.fallbackModel`; the eval harness covers three tiers (strong hosted, free tier, local 3B), **all via the same localhost proxy** |
 | Temperature | `0` |
 | MCP attach | Session `mcpServers: [{ name: 'forge-workspace', requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command'] }]` |
 | Streaming | SDK turn stream mapped to `token` / `tool_call` / `tool_result` / `approval` / `error` / `done` |
@@ -156,7 +138,7 @@ Retrieval order (documented in `docs/context-strategy.md`): `@file` / `@symbol` 
 | Cancel | `sdk.sessions.cancel` + local `AbortSignal` |
 | Loopback policy | `NETWORK_POLICY_ENABLED=true`, `OUTBOUND_URL_ALLOWED_HOSTS=["localhost","127.0.0.1"]` |
 
-`agent-definition.json` sets `"preload": false` (deferred tool loading). **`TrueForgeClient.createSession` does not pass `preload: false`.** A spike (`spikes/verify-stage1.ts`) tests it; the production session path does not. There is **no automatic failover to a second configured model** — Task C’s 10-point anchor is not implemented. After retries the user sees the clear error and git stays clean (7-point anchor).
+Deferred tool loading: `TrueForgeClient.createSession` attaches the MCP server with `preload: false` (same as `agent-definition.json`), so tool definitions load when the agent first needs them. Tool approval: `apply_patch_hunk` and `run_terminal_command` require approval; TrueForge pauses the turn with `tool.approval_required`, the chat shows Allow / Deny (CodeLens Accept / Reject on the matching hunk answers it too), and the turn resumes with `user.tool_approval` input through `sessions.createTurnStream`. Automatic fallback: if a run on `forge.model` fails before any tool call, a new session on `forge.fallbackModel` replays the request with no user action (see `docs/model-setup.md`). Without a fallback configured, the user sees one clear error and git stays clean.
 
 No provider API keys live in this repo. `model.example.json` is a placeholder pointing at Ollama’s OpenAI-compatible port (`11434`), which is **not** what the extension calls by default (`8790`).
 
@@ -205,13 +187,14 @@ CI (`.github/workflows/ci.yml`): Node 20, `build`, `typecheck`, `lint`, `test:un
 
 ```bash
 cd Truefoundry-IITB-Forge-a-thon
-npm install
+npm ci
 npm run build
 npm run typecheck
 npm run lint
 npm run test:unit
-npm run package   # packages forge-agent-0.1.0.vsix
 ```
+
+Run the extension from source with F5 (below). A packaged VSIX is not the supported path: the TrueForge SDK is kept external in the bundle, so a VSIX built with `--no-dependencies` would not contain it.
 
 #### One-Click Launcher & Self-Test (T5)
 
@@ -223,7 +206,9 @@ npm run start:all
 
 Launch **Run Extension (Flask Workspace)** from `.vscode/launch.json` (F5). That opens `../flask` with `--extensionDevelopmentPath` set here.
 
-Commands: `Forge: Inline Edit`, `Forge: Open Agent Panel`, `Forge: Cancel Run`, `Forge: Undo Whole Task`, `Forge: Copy MCP Connector Settings`.
+Open the agent chat from the **Forge Agent** icon in the activity bar (or `Forge: Open Agent Chat`). For a Cursor-style layout, drag the view onto the right-hand Secondary Side Bar (View → Appearance → Secondary Side Bar).
+
+Commands: `Forge: Inline Edit` (`Ctrl+Alt+K` / `Cmd+Alt+K` with a selection), `Forge: Open Agent Chat`, `Forge: Cancel Run`, `Forge: Undo Whole Task`, `Forge: Copy MCP Connector Settings`, `Forge: Start All`, `Forge: Self-Test`.
 
 ### Flask target
 
@@ -235,8 +220,10 @@ git fetch --tags
 git checkout 22d92470
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]" pytest
+pip install -e . "pytest==8.4.2" python-dotenv asgiref
 ```
+
+Pin pytest to 8.4.2 (the version in Flask's `uv.lock`). pytest 9 removed `_pytest.monkeypatch.notset`, which `tests/test_cli.py` imports, so an unpinned install fails Task B's check at import time. With the pin, stock Flask gives `58 passed`.
 
 Organizer checks (after a *successful* agent run + Accept):
 
@@ -269,7 +256,8 @@ Settings:
 | --- | --- |
 | `forge.trueforgeUrl` | `http://localhost:8790` |
 | `forge.mcpPort` | `8765` |
-| `forge.model` | `qwen2.5-coder:7b` |
+| `forge.model` | `ollama/llama-3-2-3b` |
+| `forge.fallbackModel` | empty (set a second `provider/model` to enable automatic fallback) |
 | `forge.temperature` | `0` |
 
 ### Eval harness
@@ -310,17 +298,13 @@ License: MIT (see `LICENSE`).
 
 ## Limitations
 
-1. **Live Tasks A/B were not re-run in this evaluation** because TrueForge would not start (migration error) and Flask still has stock 3.1.3 behavior.
-2. **Eval harness stored results are all FAIL** (proxy down). Do not cite `eval/results/` as a pass table.
-3. **Task A has a canned local rewriter** (`transformGetDebugFlag`) used in tests. That is not the production inline-edit path, but it can inflate a demo if someone wires it back.
-4. **No second-model fallback.** Dead port → 3 retries → one sentence. Workspace unchanged. Full 10-point Task C anchor is not met.
-5. **Cancel does not auto-revert already accepted hunks.** Use `Forge: Undo Whole Task`. That is the 7-point streaming/cancel anchor, not 10.
-6. **Context map is not fed from MCP reads.** Budget and “which files and why” are not proven visible on Task B.
-7. **`preload: false` is not applied in `createSession`.** Deferred tool loading is a spike, not the live session.
-8. **Python-centric** symbol/AST helpers. Terminal allowlist is Flask-demo shaped.
-9. **Node engine vs CI** (22.14 vs 20). README previously claimed `out/`; the build emits `dist/`.
-10. **No competition video in-tree.** Presentation criterion C1 cannot be scored above 0 from this repository alone.
-11. **`docs/scorecard.md` is not the 100-point rubric** (feature list + timestamps). The table below is.
+1. **No live end-to-end run yet** of Tasks A, B and C through TrueForge with a model (see Verification status).
+2. **Model fallback only before the first tool call.** A model failure after the agent has started reading or proposing is reported, not replayed on the fallback model. Fallback needs `forge.fallbackModel` set to a second model.
+3. **Cancel does not revert hunks the user already accepted.** It stops the session, discards unapproved hunks and refuses later applies; `Undo whole task` reverts accepted ones.
+4. **Eval harness results in `eval/results/` are all FAIL** from an earlier run with an unqualified model name; its pass checks are weaker than the organizer checks.
+5. **Python-centric** symbol and syntax helpers; the terminal allowlist is shaped for the Flask tasks.
+6. **Stale-hunk check is per hunk**: a hunk is denied if its own lines changed, while edits elsewhere in the file are kept and the hunk still applies.
+7. **No VSIX distribution**; run from source with F5.
 
 ---
 
@@ -328,7 +312,7 @@ License: MIT (see `LICENSE`).
 
 | Card | Task Description | Protected Points | Implementation Details |
 |---|---|---|---|
-| **T0** | Reset TrueForge & SDK pinning | Core Infrastructure | Pinned `@truefoundry/trueforge-sdk` v0.184.1 + Gemini/Ollama/Claude provider config |
+| **T0** | Reset TrueForge & SDK pinning | Core Infrastructure | Pinned `@truefoundry/trueforge-sdk` v0.184.1 + Gemini/Ollama/OpenAI provider config |
 | **T1** | Remove test fixtures, make verification real | Credibility | Workspace cleanliness and AST verification against live repository |
 | **T2** | Route Task A through TrueForge client | A1, B4 | Direct SDK integration replacing hardcoded mock transformers |
 | **T3** | Context ledger and live context map | B1 (+5) | `ContextLedger` deduplicates repeat queries (0-cost hits) and records why files were searched |
@@ -338,42 +322,32 @@ License: MIT (see `LICENSE`).
 | **T7** | Second-model fallback | B3 (+3) | Automatic failover to secondary model upon dead port, timeout, or rate-limiting |
 | **T8** | Fault-injection proxy | B3, A3 | `FaultInjectionProxy` with 6 modes: `refused`, `rate_limit`, `auth_error`, `stall`, `stream_drop`, `malformed_json` |
 | **T9** | Edit robustness and typed errors | A1, A2 | 3-tier matcher (exact, whitespace, anchor), closest-match diagnostics, unified diff & full-file input |
-| **T10** | Real eval harness & rubric | C2, Repeatability | Machine-scored evaluation rubric in `eval/rubric.ts` with multi-model matrix (Sonnet, Gemini, Llama) |
-| **T11** | Stress tests on big repos | B3, A3 | 186 unit tests passing; <5s symbol/text search on 1000+ files, output caps, bounded heap (<512 MB) |
-| **T12** | Package VSIX, CI, README | Submission | `.vscodeignore`, `npm run package` producing valid VSIX, updated CI matrix, and demo guide |
+| **T10** | Real eval harness & rubric | C2, Repeatability | Machine-scored evaluation rubric in `eval/rubric.ts` with a multi-model matrix (strong hosted, free tier, local) |
+| **T11** | Stress tests on big repos | B3, A3 | <5s symbol/text search on 1000+ files, output caps, bounded heap (<512 MB) |
+| **T12** | Package VSIX, CI, README | Submission | `.vscodeignore`, CI workflow, and demo guide |
 
 ---
 
 ## Judge scorecard
 
-Anchors from the organizer rubric. All 186 unit tests are passing across 30 files.
+Organizer rubric, 100 points. For each row: the anchor we are building for, what the code does, what has been verified, and what is still needed. **No score is claimed** until the three fixed tasks have run live and been recorded; video timestamps are filled in from the recording (template in `docs/scorecard.md`).
 
-| ID | Criterion | Points | Why |
-| --- | ---: | ---: | --- |
-| A1 | Inline edit | **10** / 10 | 3-tier matcher (exact, whitespace-normalized, anchor match), in-memory Python AST validation, per-hunk CodeLens Accept/Reject, native diff review. |
-| A2 | Agent mode | **10** / 10 | Raw prompt without filename hints, multi-file discovery, context ledger tracking, safe tool loop via MCP, full-file and unified diff support. |
-| A3 | Streaming | **10** / 10 | Real-time token streaming timeline, immediate session cancellation (`sessions.cancel`), discarding unapplied hunks, and clean inverse-diff task undo. |
-| B1 | Context assembly | **15** / 15 | Context budget tracker, `ContextLedger` with duplicate call caching at 0 cost, structured search reasons, and live context map. |
-| B2 | Diff safety | **10** / 10 | Propose-only until explicit user Accept, per-hunk review, stale hunk protection, inverse-edit undo, and zero unapproved disk writes. |
-| B3 | Resilience (Task C) | **10** / 10 | Fault-injection proxy covering 6 failure modes, 3x exponential backoff, single-sentence typed errors (no stack dumps), and second-model fallback. |
-| B4 | TrueForge integration | **10** / 10 | Real TrueForge SDK sessions, deferred tool loading (`preload: false`), editor capabilities exposed via MCP, dynamic model routing. |
-| C1 | Video | **10** / 10 | Complete demo walkthrough instructions and test reproduction scripts documented in `demo/README.md`. |
-| C2 | Write-up | **15** / 15 | Exhaustive architecture writeup, 13 detailed spike records in `docs/spikes.md`, machine-scored evaluation harness, and honest limitations breakdown. |
-| | **Total** | **100** / 100 | A: 30/30 · B: 45/45 · C: 25/25 |
+| ID | Criterion | Pts | Target anchor | In the code | Verified so far | Still needed |
+| --- | --- | ---: | --- | --- | --- | --- |
+| A1 | Inline edit | 10 | Diff in the editor with per-hunk accept / reject | Selection + instruction → TrueForge session → model calls `propose_edit` → native diff and per-hunk CodeLens Accept / Reject | Task A tool chain on Flask: `FLASK_DEBUG=off` → `False`; unit tests | Live run with a model, on camera |
+| A2 | Agent mode | 10 | Discovers and edits 3+ files unprompted | Chat sends the prompt as typed; search / symbols / related / read / propose tools; all hunks of a multi-hunk patch apply | Task B tool chain on Flask: 3 files, 60 passed, `config` in `--help`, secrets masked (tool calls scripted, no model) | A model finding the 3 files itself, on camera |
+| A3 | Streaming and cancellation | 10 | Immediate cancel, workspace consistent | Token deltas stream into the chat; Cancel calls `sessions.cancel`, discards unapproved hunks, refuses later applies | SDK event mapping and cancel paths in unit tests | Live stream and mid-run cancel with `git status` clean |
+| B1 | Context assembly | 15 | Size budget, stated strategy, visible in Task B | 12k-token / 8-file / 30-hit / 200-line budget; ledger with reasons; context map in the chat; `@file` / `@symbol` mentions | Unit tests; chat rendered with recorded tool outputs | The context map visible during the live Task B |
+| B2 | Diff safety | 10 | Per-hunk review and working undo, on screen | Nothing written before approval; per-hunk review; stale-hunk denial; Undo whole task via inverse edits | Tool chain: git clean after propose, stale hunk denied, double apply refused; undo unit tests | Undo shown on screen |
+| B3 | Resilience (Task C) | 10 | Automatic fallback to a second model, workspace unchanged | Retry with backoff, one-sentence errors, automatic fallback to `forge.fallbackModel` before the first tool call | Unit tests with a fake SDK (dead endpoint, invalid key) | Two models configured in TrueForge; Task C on camera with `git status` empty |
+| B4 | TrueForge integration | 10 | MCP tools + approval drives review + a context-engineering feature | Editor capabilities as MCP tools; approval on `apply_patch_hunk` / `run_terminal_command` resumed via `user.tool_approval`; deferred tool loading (`preload: false`) | Mapping and resume tested against SDK v0.184.1 types | The TrueForge session (turns, tool calls) shown during Task B |
+| C1 | Video | 10 | A, B, C in order, each verified on screen | — | Not recorded yet | Record (≤ 4 min) |
+| C2 | Write-up | 15 | Architecture, context strategy, model setup, accurate scorecard, honest limits | `docs/architecture.md`, `docs/context-strategy.md`, `docs/model-setup.md`, Limitations above | PDF not written yet | Write the 1–3 page PDF with the eight required headings |
 
-### Verdict
+### Design choices
 
-- **Is it good?** As an editor harness: exceptional. Review gating, sandbox confinement, tool allowlist, exponential backoff, inverse undo, and 3-tier edit matching are backed by 186 passing tests.
-- **Is it efficient?** Yes. Strict token budget enforcement (12k limit), duplicate tool caching at 0 cost, and output sanitization capping ensure tight cost control.
-- **Can it handle real organizational tasks?** Yes. All disk mutations require user review, secrets are strictly masked as `***`, credentials remain in SecretStorage, and the extension packages cleanly as a `.vsix` ready for installation.
-
-### What stands out
-
-- Disk writes are a privilege, not a default.
-- Inverse-edit undo instead of clobbering the file.
-- Multi-tier fuzzy matching tolerating whitespace and indentation differences on weaker models.
-- Fault-injection proxy allowing automated verification of offline and transient failure states.
-- Error taxonomy that matches the organizer's "one sentence, no stack."
-- Full test suite of 186 passing tests validating the entire pipeline end-to-end.
-
-
+- Disk writes go through review: proposals are staged in memory and written hunk by hunk only after approval.
+- Undo uses recorded inverse edits instead of restoring whole-file snapshots, so unrelated user edits survive.
+- Edits are matched in three tiers (exact, whitespace-normalized, anchor) so weaker models still land their changes, and a phantom-import check rejects new imports that do not resolve before the user sees the diff.
+- A fault-injection proxy exercises dead ports, rate limits, bad keys, stalls, dropped streams and malformed JSON.
+- Errors reach the user as one sentence, never a stack trace.

@@ -1,3 +1,4 @@
+import { escapeHtml } from './html';
 import { ContextEntry } from '../../../shared/types';
 import { WebviewBudgetMeter, WebviewContextGroupItem } from '../../messages';
 
@@ -61,8 +62,8 @@ export class ContextMapComponent {
     graphContainer.className = 'context-graph-flow';
     const flowItems = entries.map((e, idx) => {
       const cleanName = e.uri.split(/[/\\]/).pop() || e.uri;
-      const arrow = idx < entries.length - 1 ? '<span class="flow-arrow">â†’</span>' : '';
-      return `<span class="flow-node" title="${e.uri} (${e.metadata?.reason || e.type})">${cleanName}</span> ${arrow}`;
+      const arrow = idx < entries.length - 1 ? '<span class="flow-arrow">→</span>' : '';
+      return `<span class="flow-node" title="${escapeHtml(e.uri)} (${escapeHtml(e.metadata?.reason || e.type)})">${escapeHtml(cleanName)}</span> ${arrow}`;
     });
     graphContainer.innerHTML = `<div class="flow-title">Navigation Flow:</div><div class="flow-chain">${flowItems.join(' ')}</div>`;
     this.element.appendChild(graphContainer);
@@ -72,8 +73,8 @@ export class ContextMapComponent {
     for (const e of entries) {
       const li = document.createElement('li');
       li.className = `entry entry-${e.type}`;
-      const reasonBadge = e.metadata?.reason ? `<span class="entry-reason">"<em>${e.metadata.reason}</em>"</span>` : '';
-      li.innerHTML = `<strong>[${e.type}]</strong> <span class="entry-uri">${e.uri}</span> ${e.tokenCount ? `<span class="entry-tokens">(~${e.tokenCount} tokens)</span>` : ''} ${reasonBadge}`;
+      const reasonBadge = e.metadata?.reason ? `<span class="entry-reason">"<em>${escapeHtml(e.metadata.reason)}</em>"</span>` : '';
+      li.innerHTML = `<strong>[${escapeHtml(e.type)}]</strong> <span class="entry-uri">${escapeHtml(e.uri)}</span> ${e.tokenCount ? `<span class="entry-tokens">(~${e.tokenCount} tokens)</span>` : ''} ${reasonBadge}`;
       list.appendChild(li);
     }
     this.element.appendChild(list);
@@ -95,7 +96,7 @@ export class ContextMapComponent {
         li.style.fontSize = '0.85em';
         li.style.marginBottom = '4px';
         const rangeStr = item.lineRange ? ` [${item.lineRange}]` : '';
-        li.innerHTML = `• <code>${item.path}</code>${rangeStr} : <em>${item.reason}</em>`;
+        li.innerHTML = `• <code>${escapeHtml(item.path)}</code>${escapeHtml(rangeStr)} : <em>${escapeHtml(item.reason)}</em>`;
         ul.appendChild(li);
       }
       groupDiv.appendChild(ul);

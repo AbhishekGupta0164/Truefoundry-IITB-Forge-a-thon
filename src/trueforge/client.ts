@@ -12,11 +12,11 @@ import { ForgeEvent } from '../shared/events';
 import { TOTAL_RUN_SAFETY_CAP } from '../shared/constants';
 import { getTrueForgeConfig, TrueForgeConfig } from './config';
 import { withRetry } from './retry';
-import { ApprovalMatcher, ResumePayload } from './approvals';
+import { ApprovalMatcher, SdkToolApprovalEvent } from './approvals';
 import { LoopGuard } from './loop-guard';
 import { SessionStateManager, defaultSessionStateManager } from './session-state';
 import { StreamReconnector } from './reconnect';
-import { SessionCancelledError, LoopGuardError } from '../shared/errors';
+import { SessionCancelledError, LoopGuardError, ForgeBaseError, getUserFacingErrorMessage } from '../shared/errors';
 
 export interface InlineEditTaskParams {
   filePath: string;
@@ -31,6 +31,52 @@ export interface InlineEditTaskParams {
   fullContent?: string;
 }
 
+/** One `user.tool_approval` turn input item (SDK UserToolApprovalInputEvent). */
+export type ApprovalInput = SdkToolApprovalEvent & { threadId: string };
+
+export interface ToolCallInfo {
+  name: string;
+  arguments: Record<string, unknown>;
+  threadId: string;
+}
+
+/** Subset of the SDK ToolCall shape carried on `model.message.toolCalls`. */
+interface SdkToolCall {
+  id: string;
+  function?: { name?: string; arguments?: string };
+  toolInfo?: { type?: string; name?: string };
+}
+
+/** Prefer the raw MCP tool name over the provider-facing function name. */
+export function resolveToolName(call: SdkToolCall): string {
+  if (call.toolInfo?.type === 'mcp' && call.toolInfo.name) {
+    return call.toolInfo.name;
+  }
+  return call.function?.name ?? '';
+}
+
+/** Tool arguments arrive as a JSON string; malformed JSON is surfaced, not hidden. */
+export function parseToolArguments(raw: string | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : { value: parsed };
+  } catch {
+    return { _unparsedArguments: raw };
+  }
+}
+
+/** TrueForge addresses models as "<provider-account>/<model>", e.g. "ollama/qwen2-5-coder-7b". */
+export function isQualifiedModelName(name: string | undefined): name is string {
+  return typeof name === 'string' && /^[^/\s]+\/\S+$/.test(name);
+}
+
+export interface ModelFallbackInfo {
+  from: string;
+  to: string;
+  reason: string;
+}
+
 export class TrueForgeClient {
   private config: TrueForgeConfig;
   private sdk: TrueForgeInstance = null;
@@ -39,6 +85,10 @@ export class TrueForgeClient {
   public readonly sessionManager: SessionStateManager;
   public readonly reconnector: StreamReconnector;
   private abortController: AbortController | null = null;
+  private toolCalls = new Map<string, ToolCallInfo>();
+  private awaitingApproval = new Map<string, ApprovalInput | null>();
+  private fallbackListeners = new Set<(info: ModelFallbackInfo) => void>();
+  private activeModel = '';
 
   constructor(
     configOverride?: Partial<TrueForgeConfig>,
@@ -83,6 +133,12 @@ export class TrueForgeClient {
   ): Promise<string> {
     const targetModel = model ?? this.config.model;
     const preload = options.preload ?? false;
+    if (!isQualifiedModelName(targetModel)) {
+      throw new ForgeBaseError(
+        `Model "${targetModel}" must be "provider/model" exactly as configured in TrueForge (Settings > Models).`,
+        'MODEL_NAME_INVALID'
+      );
+    }
 
     const instructions = instructionsOverride ?? [
       'You are Forge Agent — an autonomous coding assistant embedded in VS Code.',
@@ -130,8 +186,12 @@ export class TrueForgeClient {
       });
 
       console.log(`[forge] session created id=${session.id} model=${modelName} preload=${preload}`);
+      this.activeModel = modelName;
       this.sessionManager.setSession(session.id);
       this.loopGuard.reset();
+      this.toolCalls.clear();
+      this.awaitingApproval.clear();
+      this.approvals.clear();
       return session.id;
     };
 
@@ -141,10 +201,12 @@ export class TrueForgeClient {
         { targetUrl: this.config.baseUrl }
       );
     } catch (err) {
-      if (this.config.fallbackModel && this.config.fallbackModel !== targetModel) {
+      if (this.canFallBackFrom(targetModel)) {
         console.warn(`[Forge] Primary model '${targetModel}' failed after retries. Failing over to fallback: '${this.config.fallbackModel}'`);
+        const fallbackModel = this.config.fallbackModel;
+        this.notifyFallback({ from: targetModel, to: fallbackModel, reason: getUserFacingErrorMessage(err, this.config.baseUrl) });
         return await withRetry(
-          () => tryCreate(this.config.fallbackModel!),
+          () => tryCreate(fallbackModel),
           { targetUrl: this.config.baseUrl }
         );
       }
@@ -159,8 +221,6 @@ export class TrueForgeClient {
   public async runTaskA(
     params: InlineEditTaskParams
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    const sessionId = await this.createSession();
-
     const start = params.selectionRange.startLine;
     const end = params.selectionRange.endLine;
     const filePath = params.filePath;
@@ -168,7 +228,7 @@ export class TrueForgeClient {
 
     const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.`;
 
-    return await this.sendTurn(sessionId, prompt);
+    return this.runWithFallback(prompt);
   }
 
   /**
@@ -180,8 +240,106 @@ export class TrueForgeClient {
     contextSummary?: string,
     options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
+    return this.runWithFallback(rawRequest, contextSummary, options);
+  }
+
+  /** Subscribe to automatic primary -> fallback model switches. Returns an unsubscribe function. */
+  public onModelFallback(listener: (info: ModelFallbackInfo) => void): () => void {
+    this.fallbackListeners.add(listener);
+    return () => this.fallbackListeners.delete(listener);
+  }
+
+  /** Model used by the current session. */
+  public getActiveModel(): string {
+    return this.activeModel;
+  }
+
+  private notifyFallback(info: ModelFallbackInfo): void {
+    console.warn(`[forge] model fallback ${info.from} -> ${info.to}: ${info.reason}`);
+    for (const listener of this.fallbackListeners) {
+      listener(info);
+    }
+  }
+
+  private canFallBackFrom(model: string): boolean {
+    const fallback = this.config.fallbackModel;
+    return isQualifiedModelName(fallback) && fallback !== model;
+  }
+
+  /**
+   * Run one request on the primary model; if the turn fails before the agent made any
+   * tool call (unreachable endpoint, invalid key, provider error), start a fresh session
+   * on the configured fallback model and replay the same request, with no user action.
+   *
+   * Nothing is staged or written before the first tool call, so the switch cannot leave
+   * a half-applied change. A failure after tool calls, a cancel, or a loop-guard stop is
+   * reported as-is instead of being replayed.
+   */
+  public async runWithFallback(
+    prompt: string,
+    contextSummary?: string,
+    options?: { preload?: boolean; compaction?: boolean }
+  ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const sessionId = await this.createSession(undefined, undefined, options);
-    return await this.sendTurn(sessionId, rawRequest, contextSummary);
+    const usedModel = this.activeModel;
+    let primary: AsyncGenerator<ForgeEvent, void, unknown> | null = null;
+    let startError: unknown = null;
+    try {
+      primary = await this.sendTurn(sessionId, prompt, contextSummary);
+    } catch (err) {
+      if (!this.canFallBackFrom(usedModel) || err instanceof SessionCancelledError) {
+        throw err;
+      }
+      startError = err;
+    }
+    return this.fallbackStream(primary, startError, usedModel, prompt, contextSummary, options);
+  }
+
+  private async *fallbackStream(
+    primary: AsyncGenerator<ForgeEvent, void, unknown> | null,
+    startError: unknown,
+    usedModel: string,
+    prompt: string,
+    contextSummary?: string,
+    options?: { preload?: boolean; compaction?: boolean }
+  ): AsyncGenerator<ForgeEvent, void, unknown> {
+    let failure: string | null = startError ? getUserFacingErrorMessage(startError, this.config.baseUrl) : null;
+
+    if (primary) {
+      let sawToolCall = false;
+      try {
+        for await (const event of primary) {
+          if (event.type === 'tool_call') sawToolCall = true;
+          const recoverable =
+            event.type === 'error' &&
+            event.code !== 'LOOP_GUARD_TRIGGERED' &&
+            !sawToolCall &&
+            !this.sessionManager.isCancelled() &&
+            this.canFallBackFrom(usedModel);
+          if (recoverable) {
+            failure = event.message;
+            break;
+          }
+          yield event;
+        }
+      } catch (err) {
+        const recoverable = !sawToolCall && !this.sessionManager.isCancelled() && this.canFallBackFrom(usedModel);
+        if (!recoverable) throw err;
+        failure = getUserFacingErrorMessage(err, this.config.baseUrl);
+      }
+    }
+
+    if (failure === null) return;
+
+    const fallbackModel = this.config.fallbackModel;
+    this.notifyFallback({ from: usedModel, to: fallbackModel, reason: failure });
+    yield {
+      type: 'token',
+      text: `\n[Forge] Model ${usedModel} failed (${failure}) Switched to fallback model ${fallbackModel}.\n`,
+      timestamp: Date.now()
+    };
+    const sessionId = await this.createSession(fallbackModel, undefined, options);
+    yield* await this.sendTurn(sessionId, prompt, contextSummary);
   }
 
   public getAbortController(): AbortController | null {
@@ -236,19 +394,7 @@ export class TrueForgeClient {
     try {
       for await (const raw of sdkStream) {
         if (this.sessionManager.isCancelled()) {
-          yield {
-            type: 'done',
-            status: 'cancelled',
-            budget: {
-              maxTokens: TOTAL_RUN_SAFETY_CAP.MAX_TOKENS,
-              usedTokens,
-              maxCostUsd: TOTAL_RUN_SAFETY_CAP.MAX_COST_USD,
-              usedCostUsd: 0,
-              maxIterations: TOTAL_RUN_SAFETY_CAP.MAX_ITERATIONS,
-              currentIteration: 1
-            },
-            timestamp: Date.now()
-          };
+          yield this.doneEvent('cancelled', usedTokens);
           return;
         }
 
@@ -266,115 +412,105 @@ export class TrueForgeClient {
 
         switch (event.type) {
           case 'model.message.delta': {
-            const text: string = event.delta?.text ?? '';
+            // SDK ModelMessageDeltaEvent: streamed text lives in `content`.
+            const text = typeof event.content === 'string' ? event.content : '';
             if (text) {
               yield { type: 'token', text, timestamp: Date.now() };
             }
             break;
           }
 
-          case 'tool.call': {
-            const callId = event.tool_call_id ?? event.id ?? '';
-            const toolName = event.name ?? '';
-            const args = event.arguments ?? {};
+          case 'model.message': {
+            // SDK ModelMessageEvent: completed tool calls arrive in `toolCalls`.
+            const toolCalls: SdkToolCall[] = Array.isArray(event.toolCalls) ? event.toolCalls : [];
+            for (const call of toolCalls) {
+              const callId = call.id;
+              const toolName = resolveToolName(call);
+              const args = parseToolArguments(call.function?.arguments);
+              this.toolCalls.set(callId, { name: toolName, arguments: args, threadId: event.threadId ?? '' });
 
-            // Enforce Agent Loop Guard (max 20 calls, max 3 identical calls)
-            try {
-              this.loopGuard.recordAndCheck({ name: toolName, arguments: args });
-            } catch (err) {
-              if (err instanceof LoopGuardError) {
-                yield {
-                  type: 'error',
-                  code: 'LOOP_GUARD_TRIGGERED',
-                  message: err.message,
-                  timestamp: Date.now()
-                };
-                yield {
-                  type: 'done',
-                  status: 'cancelled',
-                  budget: {
-                    maxTokens: TOTAL_RUN_SAFETY_CAP.MAX_TOKENS,
-                    usedTokens,
-                    maxCostUsd: TOTAL_RUN_SAFETY_CAP.MAX_COST_USD,
-                    usedCostUsd: 0,
-                    maxIterations: TOTAL_RUN_SAFETY_CAP.MAX_ITERATIONS,
-                    currentIteration: 1
-                  },
-                  timestamp: Date.now()
-                };
-                return;
+              // Enforce Agent Loop Guard (max 20 calls, max 3 identical calls)
+              try {
+                this.loopGuard.recordAndCheck({ name: toolName, arguments: args });
+              } catch (err) {
+                if (err instanceof LoopGuardError) {
+                  yield {
+                    type: 'error',
+                    code: 'LOOP_GUARD_TRIGGERED',
+                    message: err.message,
+                    timestamp: Date.now()
+                  };
+                  yield this.doneEvent('cancelled', usedTokens);
+                  return;
+                }
+                throw err;
               }
-              throw err;
-            }
 
-            yield {
-              type: 'tool_call',
-              toolCallId: callId,
-              name: toolName,
-              arguments: args,
-              timestamp: Date.now()
-            };
+              yield {
+                type: 'tool_call',
+                toolCallId: callId,
+                name: toolName,
+                arguments: args,
+                timestamp: Date.now()
+              };
+            }
+            if (event.usage) {
+              usedTokens += (event.usage.inputTokens ?? 0) + (event.usage.outputTokens ?? 0);
+            }
             break;
           }
 
-          case 'tool.call.result': {
+          case 'tool.response': {
+            // SDK ToolResponseEvent: { toolCallId, content }
+            const info = this.toolCalls.get(event.toolCallId);
+            const output = typeof event.content === 'string' ? event.content : JSON.stringify(event.content);
             yield {
               type: 'tool_result',
               result: {
-                toolCallId: event.tool_call_id ?? '',
-                name: event.name ?? '',
-                success: !event.error,
-                output: typeof event.output === 'string' ? event.output : JSON.stringify(event.output),
-                error: event.error ? String(event.error) : undefined
+                toolCallId: event.toolCallId ?? '',
+                name: info?.name ?? '',
+                success: true,
+                output
               },
               timestamp: Date.now()
             };
             break;
           }
 
-          case 'usage': {
-            usedTokens = event.total_tokens ?? 0;
+          case 'tool.approval_required': {
+            // SDK ToolApprovalRequiredEvent: { threadId, toolCalls: [{ id, sourceEventId }] }
+            const refs: { id: string }[] = Array.isArray(event.toolCalls) ? event.toolCalls : [];
+            for (const ref of refs) {
+              const info = this.toolCalls.get(ref.id) ?? { name: '', arguments: {}, threadId: event.threadId ?? '' };
+              if (!info.threadId) info.threadId = event.threadId ?? '';
+              this.toolCalls.set(ref.id, info);
+              this.awaitingApproval.set(ref.id, null);
+              this.approvals.registerPending({ id: ref.id, name: info.name, arguments: info.arguments });
+              yield {
+                type: 'approval',
+                requestId: ref.id,
+                action: info.name,
+                requiresManualReview: true,
+                timestamp: Date.now()
+              };
+            }
             break;
           }
 
-          case 'error': {
-            yield {
-              type: 'error',
-              code: event.code ?? 'UNKNOWN',
-              message: event.message ?? String(event),
-              timestamp: Date.now()
-            };
-            return;
-          }
-
-          case 'tool.approval_required':
-          case 'approval_request': {
-            yield {
-              type: 'approval',
-              requestId: event.request_id ?? event.id ?? '',
-              action: event.action ?? 'apply_patch_hunk',
-              requiresManualReview: true,
-              timestamp: Date.now()
-            };
-            break;
-          }
-
-          case 'session.turn.stop':
-          case 'turn.done':
-          case 'done': {
-            yield {
-              type: 'done',
-              status: event.status === 'cancelled' ? 'cancelled' : 'completed',
-              budget: {
-                maxTokens: TOTAL_RUN_SAFETY_CAP.MAX_TOKENS,
-                usedTokens,
-                maxCostUsd: TOTAL_RUN_SAFETY_CAP.MAX_COST_USD,
-                usedCostUsd: 0,
-                maxIterations: TOTAL_RUN_SAFETY_CAP.MAX_ITERATIONS,
-                currentIteration: 1
-              },
-              timestamp: Date.now()
-            };
+          case 'turn.done': {
+            // SDK TurnDoneEvent: outcome is in `state.status` ('done' | 'cancelled' | 'error').
+            const status = event.state?.status;
+            if (status === 'error') {
+              yield {
+                type: 'error',
+                code: 'TURN_FAILED',
+                message: event.state?.message ?? 'The model run failed.',
+                timestamp: Date.now()
+              };
+              yield this.doneEvent('failed', usedTokens);
+              return;
+            }
+            yield this.doneEvent(status === 'cancelled' ? 'cancelled' : 'completed', usedTokens);
             return;
           }
 
@@ -390,9 +526,13 @@ export class TrueForgeClient {
     }
 
     // Stream ended without explicit done event
-    yield {
+    yield this.doneEvent('completed', usedTokens);
+  }
+
+  private doneEvent(status: 'completed' | 'cancelled' | 'failed', usedTokens: number): ForgeEvent {
+    return {
       type: 'done',
-      status: 'completed',
+      status,
       budget: {
         maxTokens: TOTAL_RUN_SAFETY_CAP.MAX_TOKENS,
         usedTokens,
@@ -405,21 +545,82 @@ export class TrueForgeClient {
     };
   }
 
+  /** Tool calls currently paused by TrueForge, waiting for a user decision. */
+  public getPendingApprovalIds(): string[] {
+    return Array.from(this.awaitingApproval.keys());
+  }
+
+  /** Metadata (tool name, parsed arguments, thread) for a tool call seen in this run. */
+  public getToolCallInfo(toolCallId: string): ToolCallInfo | undefined {
+    return this.toolCalls.get(toolCallId);
+  }
+
   /**
-   * Resume a turn after a manual approval from the user.
+   * Record the user's decision for one paused tool call.
+   *
+   * TrueForge pauses a turn on `tool.approval_required` for a batch of tool calls and
+   * expects every decision in that batch in a single resume turn. Until the last pending
+   * call is decided this returns null; once the batch is complete it resumes the session
+   * with `user.tool_approval` input items and returns the new event stream.
+   */
+  public async decideApproval(
+    sessionId: string,
+    toolCallId: string,
+    decision: 'accept' | 'reject',
+    reason?: string
+  ): Promise<AsyncGenerator<ForgeEvent, void, unknown> | null> {
+    if (!this.awaitingApproval.has(toolCallId)) {
+      throw new Error(`No pending approval for tool call '${toolCallId}'`);
+    }
+
+    const info = this.toolCalls.get(toolCallId);
+    let approval: ApprovalInput['approval'];
+    if (info?.name === 'apply_patch_hunk') {
+      // Write approvals go through the review invariants (known hunk, not rejected, not stale).
+      const result = this.approvals.evaluateDecision(toolCallId, decision, reason);
+      approval = result.event.approval.status === 'allow'
+        ? { status: 'allow' }
+        : { status: 'deny', reason: result.event.approval.reason ?? 'Denied' };
+    } else {
+      this.approvals.removePending(toolCallId);
+      approval = decision === 'accept'
+        ? { status: 'allow' }
+        : { status: 'deny', reason: reason || 'Rejected by human reviewer' };
+    }
+
+    this.awaitingApproval.set(toolCallId, {
+      type: 'user.tool_approval',
+      threadId: info?.threadId ?? '',
+      toolCallId,
+      approval
+    });
+
+    const decided = Array.from(this.awaitingApproval.values());
+    if (decided.some((d) => d === null)) {
+      return null;
+    }
+    this.awaitingApproval.clear();
+    return this.sendApprovalResume(sessionId, decided as ApprovalInput[]);
+  }
+
+  /**
+   * Resume a paused turn. Approval decisions are sent on their own, never mixed
+   * with a new user message, via `sessions.createTurnStream`.
    */
   public async sendApprovalResume(
     sessionId: string,
-    payload: ResumePayload
-  ): Promise<void> {
-    const res = await fetch(`${this.config.baseUrl}/sessions/${sessionId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      throw new Error(`Failed to send approval resume: HTTP ${res.status}`);
+    decisions: ApprovalInput[]
+  ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
+    if (!sessionId) {
+      throw new Error('No active TrueForge session to resume');
     }
+    this.abortController = new AbortController();
+    const sdk = await this.getSdk();
+    const stream = await sdk.sessions.createTurnStream(
+      sessionId,
+      this.approvals.buildResumeTurnRequest(decisions)
+    );
+    return this._adaptStream(stream);
   }
 
   /**

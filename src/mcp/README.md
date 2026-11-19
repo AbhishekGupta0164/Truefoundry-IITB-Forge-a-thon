@@ -1,7 +1,7 @@
 # MCP Module (`src/mcp/`)
 
 ## 1. Architecture Overview
-The Forge MCP module hosts a local Model Context Protocol (MCP) server that exposes workspace tools, inspection capabilities, and safe patch staging to AI agents (e.g. TrueForge or Claude Desktop / MCP Inspector).
+The Forge MCP module hosts a local Model Context Protocol (MCP) server that exposes workspace tools, inspection capabilities, and safe patch staging to AI agents (e.g. TrueForge or MCP Inspector).
 
 ```
                       +-----------------------------+

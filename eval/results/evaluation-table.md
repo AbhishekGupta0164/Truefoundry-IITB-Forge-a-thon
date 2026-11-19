@@ -4,7 +4,7 @@
 
 | Model | Tier | Runs | Pass Rate | Median Latency | Median Tokens | Median Tool Calls | Flake Rate | Most Common Failure |
 |---|---|---|---|---|---|---|---|---|
-| **Claude 3.5 Sonnet (Strong Hosted Demo Model)** | strong_hosted | 6 | **0%** | 9 ms | 0 | 1 | 0% | UnprocessableEntityError
+| **GPT-4o mini (Strong Hosted Demo Model)** | strong_hosted | 6 | **0%** | 9 ms | 0 | 1 | 0% | UnprocessableEntityError
 Status code: 422
 Body: {
   "error": {

@@ -23,7 +23,7 @@ export function getTrueForgeConfig(): TrueForgeConfig {
   let mcpPort = Number(process.env.MCP_PORT || 8765);
   let timeoutMs = 30000;
   let model = process.env.TRUEFORGE_MODEL || 'ollama/llama-3-2-3b';
-  let fallbackModel = process.env.TRUEFORGE_FALLBACK_MODEL || 'ollama/llama-3-2-3b';
+  let fallbackModel = process.env.TRUEFORGE_FALLBACK_MODEL || '';
   let temperature = 0;
   let trueforgeVersion = process.env.TRUEFORGE_VERSION || '0.184.3';
 

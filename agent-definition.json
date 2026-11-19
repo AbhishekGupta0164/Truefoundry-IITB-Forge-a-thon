@@ -1,9 +1,15 @@
 {
   "name": "forge-coding-agent",
-  "model": "qwen2.5-coder:7b",
+  "model": "ollama/llama-3-2-3b",
+  "fallbackModel": "",
   "temperature": 0,
   "instructions": "Be brief. No explanation before tool calls. Always pass a reason when searching or reading. Search before reading. Read the implementation, tests and docs before proposing an edit. Never invent a path. Never write except by calling apply_patch_hunk once per hunk. A new command must update the implementation, a test, and the docs. A behavior change must update the docstring. Do not use the terminal to edit files.",
-  "mcpServers": ["forge-workspace"],
-  "requireApproval": ["apply_patch_hunk", "run_terminal_command"],
+  "mcpServers": [
+    "forge-workspace"
+  ],
+  "requireApproval": [
+    "apply_patch_hunk",
+    "run_terminal_command"
+  ],
   "preload": false
 }

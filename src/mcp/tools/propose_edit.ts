@@ -42,6 +42,20 @@ export interface ProposeEditResult {
   };
 }
 
+/** Every {old_str, new_str} pair in the call: the edits array if given, else the single pair. */
+function collectEdits(
+  params: ProposeEditParams,
+  repaired: { old_str: string; new_str: string }
+): { old_str: string; new_str: string }[] {
+  if (Array.isArray(params.edits) && params.edits.length > 0) {
+    return params.edits.map((e) => ({
+      old_str: String(e.old_str ?? e.oldStr ?? ''),
+      new_str: String(e.new_str ?? e.newStr ?? '')
+    }));
+  }
+  return [{ old_str: repaired.old_str, new_str: repaired.new_str }];
+}
+
 export async function executeProposeEdit(
   params: ProposeEditParams,
   workspaceManager: WorkspaceManager,
@@ -87,22 +101,30 @@ export async function executeProposeEdit(
     // Full-file replacement mode
     updatedContent = repaired.new_str;
   } else {
-    // 4. Three-Tier Matcher
-    const match = matchAndReplace(currentContent, repaired.old_str, repaired.new_str);
-    if (!match.matched) {
-      const err = match.error || { code: 'MATCH_FAILED', message: 'old_str not found' };
-      throw new Error(`old_str not found: ${err.message}`);
+    // 4. Three-Tier Matcher, applied to every edit in order. Each edit matches against the
+    //    content produced by the previous ones; any edit that fails rejects the whole call.
+    const edits = collectEdits(params, repaired);
+    if (edits.length === 0 || edits.some((e) => !e.old_str)) {
+      throw new Error('Provide old_str and new_str, or edits: [{ old_str, new_str }, ...] with a non-empty old_str in each');
     }
-    matchedTier = match.tier;
-    updatedContent =
-      currentContent.slice(0, match.startIndex) +
-      match.replacementText +
-      currentContent.slice(match.endIndex);
+    edits.forEach((edit, index) => {
+      const match = matchAndReplace(updatedContent, edit.old_str, edit.new_str);
+      if (!match.matched) {
+        const err = match.error || { code: 'MATCH_FAILED', message: 'old_str not found' };
+        const which = edits.length > 1 ? `edits[${index}]: ` : '';
+        throw new Error(`${which}old_str not found: ${err.message}`);
+      }
+      matchedTier = Math.max(matchedTier ?? 1, match.tier ?? 1) as 1 | 2 | 3;
+      updatedContent =
+        updatedContent.slice(0, match.startIndex) +
+        match.replacementText +
+        updatedContent.slice(match.endIndex);
+    });
   }
 
   // 5. In-Memory Validation Pipeline (Syntax check on python files)
   if (relativePath.endsWith('.py')) {
-    const syntax = validatePythonSource(updatedContent);
+    const syntax = validatePythonSource(updatedContent, workspaceManager.getRoot(), currentContent);
     if (!syntax.valid) {
       const firstError = syntax.errors[0] || 'Python syntax error in proposed replacement';
       throw new Error(`[SYNTAX_ERROR] ${firstError}`);

@@ -1,7 +1,7 @@
 {
   "matrix": [
     {
-      "modelName": "Claude 3.5 Sonnet (Strong Hosted Demo Model)",
+      "modelName": "GPT-4o mini (Strong Hosted Demo Model)",
       "tier": "strong_hosted",
       "totalRuns": 6,
       "passRate": 0,
@@ -35,7 +35,7 @@
     }
   ],
   "detailedRuns": {
-    "Claude 3.5 Sonnet (Strong Hosted Demo Model)": [
+    "GPT-4o mini (Strong Hosted Demo Model)": [
       {
         "runIndex": 1,
         "task": "Task A",

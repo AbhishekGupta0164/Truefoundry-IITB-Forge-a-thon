@@ -12,3 +12,4 @@ coverage/
 *.vsix
 
 .DS_Store
+__pycache__/
