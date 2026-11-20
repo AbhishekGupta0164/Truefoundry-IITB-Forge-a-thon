@@ -104,6 +104,7 @@ export class WebviewApp {
         break;
       case 'error':
         this.status.addError(msg.message);
+        this.status.setState('failed');
         break;
     }
   }

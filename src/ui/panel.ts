@@ -201,6 +201,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
    * into the webview: tokens, tool timeline, context map, approvals, completion.
    */
   public async consumeStream(stream: AsyncIterable<ForgeEvent>): Promise<void> {
+    let hasError = false;
 
     for await (const event of stream) {
       switch (event.type) {
@@ -269,6 +270,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
           break;
 
         case 'error':
+          hasError = true;
           this.postMessage({ type: 'error', message: getUserFacingErrorMessage(event.message) });
           break;
 
@@ -280,7 +282,9 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
           }
           this.postMessage({
             type: 'run_completed',
-            status: event.status === 'cancelled' ? 'cancelled' : 'completed'
+            status: hasError || event.status === 'failed'
+              ? 'failed'
+              : (event.status === 'cancelled' ? 'cancelled' : 'completed')
           });
           break;
       }

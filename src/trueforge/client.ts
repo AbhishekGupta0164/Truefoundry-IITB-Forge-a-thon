@@ -129,7 +129,7 @@ export class TrueForgeClient {
   public async createSession(
     model?: string,
     instructionsOverride?: string,
-    options: { preload?: boolean; compaction?: boolean } = {}
+    options: { preload?: boolean; compaction?: boolean; enableTools?: string[] } = {}
   ): Promise<string> {
     const targetModel = model ?? this.config.model;
     const preload = options.preload ?? false;
@@ -142,13 +142,11 @@ export class TrueForgeClient {
 
     const instructions = instructionsOverride ?? [
       'You are Forge Agent — an autonomous coding assistant embedded in VS Code.',
-      'Be brief. No explanation before tool calls. Always pass a reason when searching or reading.',
+      'When adding a feature, find the closest existing example, then change the implementation, a test and the docs, mirroring how the existing example is registered, tested and documented. Always pass a reason. Be brief.',
       'Search before reading. Read the implementation, tests and docs before proposing an edit.',
       'Never invent a path.',
       'Never write except by calling apply_patch_hunk once per hunk.',
-      'A new command must update the implementation, a test, and the docs.',
-      'A behavior change must update the docstring.',
-      'Do not use the terminal to edit files. Always give a short reason for each search and read.',
+      'Do not use the terminal to edit files.',
       'Never read .env or secret files. Respect the retrieved-context budget.'
     ].join('\n');
 
@@ -159,6 +157,9 @@ export class TrueForgeClient {
         preload,
         requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']
       };
+      if (options.enableTools && options.enableTools.length > 0) {
+        mcpServerSpec.enableTools = options.enableTools;
+      }
 
       const agentSpec: Record<string, any> = {
         model: {
@@ -226,9 +227,12 @@ export class TrueForgeClient {
     const filePath = params.filePath;
     const instruction = params.instruction;
 
-    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.`;
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
 
-    return this.runWithFallback(prompt);
+    return this.runWithFallback(prompt, undefined, {
+      preload: true,
+      enableTools: ['read_file', 'propose_edit']
+    });
   }
 
   /**
@@ -278,7 +282,7 @@ export class TrueForgeClient {
   public async runWithFallback(
     prompt: string,
     contextSummary?: string,
-    options?: { preload?: boolean; compaction?: boolean }
+    options?: { preload?: boolean; compaction?: boolean; enableTools?: string[] }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const sessionId = await this.createSession(undefined, undefined, options);
     const usedModel = this.activeModel;
@@ -301,7 +305,7 @@ export class TrueForgeClient {
     usedModel: string,
     prompt: string,
     contextSummary?: string,
-    options?: { preload?: boolean; compaction?: boolean }
+    options?: { preload?: boolean; compaction?: boolean; enableTools?: string[] }
   ): AsyncGenerator<ForgeEvent, void, unknown> {
     let failure: string | null = startError ? getUserFacingErrorMessage(startError, this.config.baseUrl) : null;
 
@@ -390,9 +394,19 @@ export class TrueForgeClient {
     sdkStream: AsyncIterable<any>
   ): AsyncGenerator<ForgeEvent, void, unknown> {
     let usedTokens = 0;
+    let gotFirst = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      if (!gotFirst) {
+        timedOut = true;
+        this.abortController?.abort();
+      }
+    }, 45_000);
 
     try {
       for await (const raw of sdkStream) {
+        gotFirst = true;
+        clearTimeout(timer);
         if (this.sessionManager.isCancelled()) {
           yield this.doneEvent('cancelled', usedTokens);
           return;
@@ -519,10 +533,23 @@ export class TrueForgeClient {
         }
       }
     } catch (streamErr) {
+      clearTimeout(timer);
+      if (timedOut) {
+        yield {
+          type: 'error',
+          code: 'MODEL_TIMEOUT',
+          message: 'The model did not answer within 45 s. Switch to a faster model in TrueForge.',
+          timestamp: Date.now()
+        };
+        yield this.doneEvent('failed', usedTokens);
+        return;
+      }
       if (this.sessionManager.isCancelled()) {
         return;
       }
       throw streamErr;
+    } finally {
+      clearTimeout(timer);
     }
 
     // Stream ended without explicit done event

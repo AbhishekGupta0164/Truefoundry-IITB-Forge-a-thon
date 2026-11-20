@@ -187,7 +187,7 @@ describe('Step 1: Routing Task A and Task B through TrueForge', () => {
     });
 
     const expectedPrompt =
-      "Edit only lines 28-35 of src/flask/helpers.py. Instruction: Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.. Read what you need, then call propose_edit with a reason. Do not write files any other way. Keep the change minimal.";
+      "Edit only lines 28-35 of src/flask/helpers.py. Instruction: Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.. Call propose_edit once with a reason. Do not answer with code in chat.";
 
     expect(sentPrompt).toBe(expectedPrompt);
   });
