@@ -97,8 +97,11 @@ export class ForgeMcpServer {
           // Auth check on /mcp, /sse, and /messages
           const authHeader = req.headers.authorization;
           let providedToken: string | undefined;
-          if (authHeader && authHeader.startsWith('Bearer ')) {
-            providedToken = authHeader.slice(7).trim();
+          if (authHeader) {
+            providedToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+          }
+          if (!providedToken && req.headers['x-api-key']) {
+            providedToken = String(req.headers['x-api-key']).trim();
           }
           if (!providedToken) {
             providedToken = url.searchParams.get('token') || undefined;

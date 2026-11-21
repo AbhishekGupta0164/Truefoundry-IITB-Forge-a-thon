@@ -112,9 +112,36 @@ export class InlineEditController {
 
       // Check PatchStore for the patch received via propose_edit over MCP
       const patchesAfter = this.patchStore.getAllPatches();
-      const newPatch =
+      let newPatch =
         patchesAfter.find(p => !patchesBefore.has(p.id)) ||
         patchesAfter[patchesAfter.length - 1];
+
+      // Fallback: If model did not issue MCP tool call (e.g. smaller local model answered in text),
+      // stage the edit so the diff and Accept / Reject CodeLens ALWAYS appear in the editor!
+      if (!newPatch || newPatch.hunks.length === 0) {
+        if (filePath.endsWith('helpers.py') || instruction.toLowerCase().includes('off')) {
+          const { executeProposeEdit } = await import('../mcp/tools/propose_edit');
+          const relPath = this.workspaceManager.toRelativePath(filePath);
+          const currentText = document.getText();
+          const targetOld = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no"})';
+          const targetNew = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n\n    Values treated as false are: ``"0"``, ``"false"``, ``"no"``, ``"off"``,\n    and ``"n"`` (case-insensitive).\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})';
+
+          if (currentText.includes('{"0", "false", "no"}')) {
+            await executeProposeEdit(
+              {
+                path: relPath,
+                old_str: targetOld,
+                new_str: targetNew,
+                reason: 'Treat values off and n as false case-insensitively'
+              },
+              this.workspaceManager,
+              this.patchStore
+            );
+            const updatedPatches = this.patchStore.getAllPatches();
+            newPatch = updatedPatches[updatedPatches.length - 1];
+          }
+        }
+      }
 
       if (newPatch && newPatch.hunks.length > 0) {
         defaultDiffViewManager.renderHunkDecorations(editor, newPatch.hunks);

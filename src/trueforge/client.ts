@@ -227,11 +227,12 @@ export class TrueForgeClient {
     const filePath = params.filePath;
     const instruction = params.instruction;
 
-    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call the tool propose_edit(path, old_str, new_str, reason) with the exact edit. Do not call any other tool. Do not answer with code in chat.`;
 
     return this.runWithFallback(prompt, undefined, {
       preload: true,
-      enableTools: ['read_file', 'propose_edit']
+      enableTools: ['read_file', 'propose_edit'],
+      instructionsOverride: 'You are Forge Agent. Your only role is to propose code edits by calling propose_edit with path, old_str, new_str, and reason. Always use the propose_edit tool.'
     });
   }
 
@@ -282,9 +283,9 @@ export class TrueForgeClient {
   public async runWithFallback(
     prompt: string,
     contextSummary?: string,
-    options?: { preload?: boolean; compaction?: boolean; enableTools?: string[] }
+    options?: { preload?: boolean; compaction?: boolean; enableTools?: string[]; instructionsOverride?: string }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    const sessionId = await this.createSession(undefined, undefined, options);
+    const sessionId = await this.createSession(undefined, options?.instructionsOverride, options);
     const usedModel = this.activeModel;
     let primary: AsyncGenerator<ForgeEvent, void, unknown> | null = null;
     let startError: unknown = null;
@@ -305,7 +306,7 @@ export class TrueForgeClient {
     usedModel: string,
     prompt: string,
     contextSummary?: string,
-    options?: { preload?: boolean; compaction?: boolean; enableTools?: string[] }
+    options?: { preload?: boolean; compaction?: boolean; enableTools?: string[]; instructionsOverride?: string }
   ): AsyncGenerator<ForgeEvent, void, unknown> {
     let failure: string | null = startError ? getUserFacingErrorMessage(startError, this.config.baseUrl) : null;
 

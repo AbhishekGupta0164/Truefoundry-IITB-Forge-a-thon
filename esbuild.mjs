@@ -27,7 +27,7 @@ async function main() {
     sourcesContent: false,
     platform: 'node',
     outfile: 'dist/extension.js',
-    external: ['vscode', '@truefoundry/trueforge-sdk'],
+    external: ['vscode'],
     logLevel: 'silent',
   });
 

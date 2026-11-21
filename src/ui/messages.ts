@@ -25,6 +25,7 @@ export type WebviewIncomingMessage =
   | { type: 'approve_tool'; requestId: string; decision: HunkDecision }
   | { type: 'cancel_run' }
   | { type: 'undo_task' }
+  | { type: 'open_session' }
   | { type: 'request_state' };
 
 export type WebviewOutgoingMessage =
