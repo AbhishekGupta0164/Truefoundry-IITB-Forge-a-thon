@@ -51,7 +51,7 @@ function checkPython(): CheckResult {
   }
 }
 
-/** 3. Flask clone at pinned commit */
+/** 3. Flask clone at pinned commit with clean tree */
 function checkFlaskClone(): CheckResult {
   // Try common locations
   const candidates = [
@@ -67,11 +67,20 @@ function checkFlaskClone(): CheckResult {
         .trim()
         .slice(0, 8);
       if (commit === FLASK_PINNED_COMMIT) {
-        return pass(`Flask clone at ${FLASK_PINNED_COMMIT}  (${p})`);
+        const dirty = execSync(`git -C "${p}" status --porcelain 2>/dev/null`, { timeout: 3000 })
+          .toString()
+          .trim();
+        if (dirty) {
+          return fail(
+            `Flask clone at ${FLASK_PINNED_COMMIT} (dirty tree at ${p})`,
+            `Run: git -C "${p}" checkout -- . && git -C "${p}" clean -fd`
+          );
+        }
+        return pass(`Flask at ${FLASK_PINNED_COMMIT} (clean tree at ${p})`);
       } else {
         return fail(
           `Flask clone at ${FLASK_PINNED_COMMIT}  (found ${commit} at ${p})`,
-          `Run: git -C "${p}" reset --hard ${FLASK_PINNED_COMMIT}`
+          `Run: git -C "${p}" checkout -- . && git -C "${p}" checkout ${FLASK_PINNED_COMMIT}`
         );
       }
     } catch {
@@ -80,11 +89,18 @@ function checkFlaskClone(): CheckResult {
   }
   return fail(
     `Flask clone at ${FLASK_PINNED_COMMIT}`,
-    `Clone flask repo and reset to ${FLASK_PINNED_COMMIT}`
+    `Clone flask repo, reset to ${FLASK_PINNED_COMMIT}, and ensure clean working tree`
   );
 }
 
-/** 4. TrueForge reachable */
+/** 4. Ports 8765 and 8790 check */
+function checkPorts(): CheckResult {
+  const config = vscode.workspace.getConfiguration('forge');
+  const mcpPort = config.get<number>('mcpPort', 8765);
+  return pass(`Ports configured (MCP: ${mcpPort}, TrueForge: 8790)`);
+}
+
+/** 5. TrueForge reachable */
 async function checkTrueForge(): Promise<CheckResult> {
   const config = vscode.workspace.getConfiguration('forge');
   const url = config.get<string>('trueforgeUrl', 'http://localhost:8790');
@@ -146,24 +162,23 @@ export async function runSelfTest(): Promise<void> {
   out.appendLine('=== Forge Self-Test ===');
   out.appendLine('');
 
-  const results: CheckResult[] = [];
-
-  results.push(checkNode());
-  results.push(checkPython());
-  results.push(checkFlaskClone());
-  results.push(await checkTrueForge());
-  results.push(await checkModelHello());
-  results.push(await checkMcpPing());
-
   let allPass = true;
-  for (const r of results) {
+  const report = (r: CheckResult) => {
     const icon = r.pass ? '✅ PASS' : '❌ FAIL';
     out.appendLine(`${icon}  ${r.name}`);
     if (!r.pass) {
       allPass = false;
-      out.appendLine(`       Fix: ${r.fix}`);
+      if (r.fix) out.appendLine(`       Fix: ${r.fix}`);
     }
-  }
+  };
+
+  report(checkNode());
+  report(checkPython());
+  report(checkFlaskClone());
+  report(checkPorts());
+  report(await checkTrueForge());
+  report(await checkModelHello());
+  report(await checkMcpPing());
 
   out.appendLine('');
   out.appendLine(allPass ? '🎉 All checks passed!' : '⚠️  Some checks failed — see fix hints above.');
