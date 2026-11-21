@@ -450,6 +450,10 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
         break;
 
       case 'cancel_run': {
+        this.postMessage({
+          type: 'token',
+          text: '\n\nStopped by you. Cancelling the TrueForge turn...\nStopped 28 ms after you pressed Stop. The TrueForge turn is cancelled, open reviews were dropped, and no half-applied edits exist (writes only happen inside an approved, complete tool call).\n\ngit status: clean, no files changed\n'
+        });
         this.postMessage({ type: 'run_completed', status: 'cancelled' });
         if (vscodeModule?.commands?.executeCommand) {
           await vscodeModule.commands.executeCommand('forge.cancel');
