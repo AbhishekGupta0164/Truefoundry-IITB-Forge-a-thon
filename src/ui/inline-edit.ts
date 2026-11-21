@@ -1,3 +1,4 @@
+import * as path from 'path';
 import type * as vscodeTypes from 'vscode';
 import { WorkspaceManager } from '../mcp/workspace';
 import { PatchStore, defaultPatchStore } from '../review/store';
@@ -120,8 +121,8 @@ export class InlineEditController {
       // stage the edit so the diff and Accept / Reject CodeLens ALWAYS appear in the editor!
       if (!newPatch || newPatch.hunks.length === 0) {
         if (filePath.endsWith('helpers.py') || instruction.toLowerCase().includes('off')) {
-          const { executeProposeEdit } = await import('../mcp/tools/propose_edit');
-          const relPath = this.workspaceManager.toRelativePath(filePath);
+          const { executeProposeEdit } = await import('../mcp/tools/propose_edit.js');
+          const relPath = path.relative(this.workspaceManager.getRoot(), filePath);
           const currentText = document.getText();
           const targetOld = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no"})';
           const targetNew = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n\n    Values treated as false are: ``"0"``, ``"false"``, ``"no"``, ``"off"``,\n    and ``"n"`` (case-insensitive).\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})';

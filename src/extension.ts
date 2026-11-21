@@ -108,9 +108,9 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    const { executeProposeEdit } = await import('./mcp/tools/propose_edit');
-    const { WorkspaceManager } = await import('./mcp/workspace');
-    const { defaultPatchStore } = await import('./review/store');
+    const { executeProposeEdit } = await import('./mcp/tools/propose_edit.js');
+    const { WorkspaceManager } = await import('./mcp/workspace.js');
+    const { defaultPatchStore } = await import('./review/store.js');
     const wm = new WorkspaceManager(wsRoot);
 
     defaultStatusBar.setWorking('TrueForge: Staging Task A edit...');
@@ -314,6 +314,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     inlineEditCmd,
+    demoTaskACmd,
     acceptHunkCmd,
     rejectHunkCmd,
     openPanelCmd,
