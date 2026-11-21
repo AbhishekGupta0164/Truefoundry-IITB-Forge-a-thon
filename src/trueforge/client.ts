@@ -216,7 +216,7 @@ export class TrueForgeClient {
     try {
       return await withRetry(
         () => tryCreate(targetModel),
-        { targetUrl: this.config.baseUrl }
+        { targetUrl: this.config.baseUrl, policy: { maxRetries: 2, initialDelayMs: 800, backoffFactor: 2 } }
       );
     } catch (err) {
       if (this.canFallBackFrom(targetModel)) {

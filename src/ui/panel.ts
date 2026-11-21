@@ -49,6 +49,15 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
     this.contextLedger = contextLedger;
     this.workspaceManager = workspaceManager;
 
+    this.trueforgeClient.onModelFallback((info) => {
+      this.postMessage({
+        type: 'model_fallback',
+        from: info.from,
+        to: info.to,
+        reason: info.reason
+      });
+    });
+
     this.contextLedger.onContextUpdate((_entry, ledger) => {
       this.syncContextLedger(ledger);
     });

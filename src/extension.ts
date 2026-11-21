@@ -101,8 +101,12 @@ export async function activate(context: vscode.ExtensionContext) {
       return;
     }
     const wsRoot = workspaceFolders[0].uri.fsPath;
-    const relPath = 'src/flask/helpers.py';
-    const absPath = require('path').join(wsRoot, relPath);
+    let relPath = 'src/flask/helpers.py';
+    let absPath = require('path').join(wsRoot, relPath);
+    if (!require('fs').existsSync(absPath)) {
+      relPath = 'flask/src/flask/helpers.py';
+      absPath = require('path').join(wsRoot, relPath);
+    }
     if (!require('fs').existsSync(absPath)) {
       vscode.window.showErrorMessage(`Forge: Cannot find ${relPath} — open the Flask folder`);
       return;
