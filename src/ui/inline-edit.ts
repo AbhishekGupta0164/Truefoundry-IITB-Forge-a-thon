@@ -34,6 +34,10 @@ export class InlineEditController {
     this.workspaceManager = options.workspaceManager ?? new WorkspaceManager();
     this.patchStore = options.patchStore ?? defaultPatchStore;
     this.trueforgeClient = options.trueforgeClient ?? defaultTrueForgeClient;
+
+    this.trueforgeClient.onModelFallback((info) => {
+      defaultStatusBar.setWorking(`Switched to fallback (${info.to})...`);
+    });
   }
 
   /**

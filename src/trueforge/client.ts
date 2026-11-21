@@ -8,6 +8,16 @@
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TrueForgeInstance = any;
+import type * as vscodeTypes from 'vscode';
+
+let vscodeModule: typeof vscodeTypes | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  vscodeModule = require('vscode');
+} catch {
+  // Running outside VS Code
+}
+
 import { ForgeEvent } from '../shared/events';
 import { TOTAL_RUN_SAFETY_CAP } from '../shared/constants';
 import { getTrueForgeConfig, TrueForgeConfig } from './config';
@@ -216,7 +226,16 @@ export class TrueForgeClient {
     try {
       return await withRetry(
         () => tryCreate(targetModel),
-        { targetUrl: this.config.baseUrl, policy: { maxRetries: 2, initialDelayMs: 800, backoffFactor: 2 } }
+        {
+          targetUrl: this.config.baseUrl,
+          policy: { maxRetries: 2, initialDelayMs: 800, backoffFactor: 2 },
+          onRetry: (attempt, delayMs) => {
+            const delaySec = (delayMs / 1000).toFixed(1);
+            const msg = `[Forge] First model unreachable: Retry ${attempt} of 2, after ${delaySec} s...`;
+            console.warn(msg);
+            vscodeModule?.window?.showWarningMessage?.(msg);
+          }
+        }
       );
     } catch (err) {
       if (this.canFallBackFrom(targetModel)) {
@@ -278,6 +297,10 @@ export class TrueForgeClient {
 
   private notifyFallback(info: ModelFallbackInfo): void {
     console.warn(`[forge] model fallback ${info.from} -> ${info.to}: ${info.reason}`);
+    const reasonText = info.reason || 'Cannot connect to API: bad port.';
+    vscodeModule?.window?.showWarningMessage?.(
+      `[Forge] ${reasonText} Switching to fallback model ${info.to}.`
+    );
     for (const listener of this.fallbackListeners) {
       listener(info);
     }
@@ -408,7 +431,16 @@ export class TrueForgeClient {
 
         return this._adaptStream(stream);
       },
-      { targetUrl: this.config.baseUrl }
+      {
+        targetUrl: this.config.baseUrl,
+        policy: { maxRetries: 2, initialDelayMs: 800, backoffFactor: 2 },
+        onRetry: (attempt, delayMs) => {
+          const delaySec = (delayMs / 1000).toFixed(1);
+          const msg = `[Forge] First model unreachable: Retry ${attempt} of 2, after ${delaySec} s...`;
+          console.warn(msg);
+          vscodeModule?.window?.showWarningMessage?.(msg);
+        }
+      }
     );
   }
 
