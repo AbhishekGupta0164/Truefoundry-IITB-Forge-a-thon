@@ -244,7 +244,7 @@ export class TrueForgeClient {
     const filePath = params.filePath;
     const instruction = params.instruction;
 
-    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call the tool propose_edit(path, old_str, new_str, reason) with the exact edit. Do not call any other tool. Do not answer with code in chat.`;
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
 
     return this.runWithFallback(prompt, undefined, {
       preload: true,
