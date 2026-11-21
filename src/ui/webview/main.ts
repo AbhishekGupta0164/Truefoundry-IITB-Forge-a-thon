@@ -1,5 +1,5 @@
 /**
- * Modern Chat UI for Forge Agent — Matches VS Code & Countersign design
+ * Modern Chat UI for Forge Agent
  */
 
 import { WebviewOutgoingMessage } from '../messages';
