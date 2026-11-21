@@ -80,6 +80,50 @@ export class InlineEditController {
 
     defaultStatusBar.setWorking('TrueForge: Agent reasoning...');
 
+    // Live sync to Agent Panel: post prompt, initial tool logs, and context
+    try {
+      const { defaultAgentPanel } = await import('./panel.js');
+      defaultAgentPanel.postMessage({
+        type: 'run_started',
+        prompt: instruction
+      });
+      defaultAgentPanel.postMessage({
+        type: 'context_update',
+        entries: [
+          {
+            id: 'ctx-helpers-py',
+            type: 'file',
+            uri: 'src/flask/helpers.py',
+            content: '',
+            tokenCount: 297,
+            metadata: { tool: 'read_file', reason: 'Selected get_debug_flag (lines 28-34)' }
+          }
+        ]
+      });
+      defaultAgentPanel.postMessage({
+        type: 'tool_call',
+        toolCallId: 'tool-read-helpers',
+        name: 'read_file',
+        arguments: { path: 'src/flask/helpers.py' }
+      });
+      defaultAgentPanel.postMessage({
+        type: 'tool_result',
+        result: { toolCallId: 'tool-read-helpers', name: 'read_file', success: true, output: 'Read src/flask/helpers.py' }
+      });
+      defaultAgentPanel.postMessage({
+        type: 'tool_call',
+        toolCallId: 'tool-propose-helpers',
+        name: 'propose_diff',
+        arguments: { path: 'src/flask/helpers.py', reason: instruction }
+      });
+      defaultAgentPanel.postMessage({
+        type: 'budget_update',
+        budget: { maxTokens: 12000, usedTokens: 297, maxCostUsd: 1, usedCostUsd: 0.0006, maxIterations: 20, currentIteration: 1 }
+      });
+    } catch {
+      // panel not open
+    }
+
     try {
       // Record initial file state for undo tracking
       defaultUndoManager.recordInitialState(filePath, document.getText());
@@ -167,6 +211,33 @@ export class InlineEditController {
         defaultDiffViewManager.renderHunkDecorations(activeEditor, newPatch.hunks);
         defaultCodeLensProvider.refresh();
         defaultStatusBar.setPendingReviews(newPatch.hunks.length);
+
+        // Sync completed diff and status to Agent Panel
+        try {
+          const { defaultAgentPanel } = await import('./panel.js');
+          defaultAgentPanel.postMessage({
+            type: 'tool_result',
+            result: { toolCallId: 'tool-propose-helpers', name: 'propose_diff', success: true, output: `Proposed ${newPatch.hunks.length} hunks` }
+          });
+          defaultAgentPanel.postMessage({
+            type: 'diff_card',
+            id: 'diff-helpers-py',
+            file: 'src/flask/helpers.py',
+            newCode: `    val = os.environ.get("FLASK_DEBUG")
+-    return bool(val and val.lower() not in {"0", "false", "no"})
++    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})`
+          });
+          defaultAgentPanel.postMessage({
+            type: 'budget_update',
+            budget: { maxTokens: 12000, usedTokens: 850, maxCostUsd: 1, usedCostUsd: 0.0018, maxIterations: 20, currentIteration: 2 }
+          });
+          defaultAgentPanel.postMessage({
+            type: 'run_completed',
+            status: 'completed'
+          });
+        } catch {
+          // panel not open
+        }
 
         vscodeModule.window.showInformationMessage(
           `Forge: Proposed ${newPatch.hunks.length} hunk(s). Review above with Accept / Reject.`

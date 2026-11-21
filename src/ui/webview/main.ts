@@ -246,6 +246,10 @@ export class WebviewApp {
         break;
 
       case 'run_started':
+        if (msg.prompt) {
+          this.appendUserMessage(msg.prompt);
+          this.initAgentResponse();
+        }
         this.setRunning(true);
         break;
 

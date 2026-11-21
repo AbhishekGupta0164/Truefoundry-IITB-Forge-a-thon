@@ -53,7 +53,7 @@ export type WebviewOutgoingMessage =
       newCode: string;
       status?: 'pending' | 'applied' | 'rejected';
     }
-  | { type: 'run_started' }
+  | { type: 'run_started'; prompt?: string }
   | { type: 'run_completed'; status: 'completed' | 'cancelled' | 'failed' }
   | { type: 'error'; message: string }
   | { type: 'model_fallback'; from: string; to: string; reason?: string };
