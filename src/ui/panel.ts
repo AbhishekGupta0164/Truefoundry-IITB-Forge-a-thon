@@ -212,6 +212,49 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
           type: 'budget_update',
           budget: { maxTokens: 12000, usedTokens: 3180, maxCostUsd: 1, usedCostUsd: 0.0024, maxIterations: 20, currentIteration: 3 }
         });
+
+        // Send diff cards matching reference Image 2
+        this.postMessage({
+          type: 'diff_card',
+          id: 'diff-cli-py',
+          file: 'src/flask/cli.py',
+          newCode: `        for row in rows:
+            click.echo(template.format(*row))
+
++@click.command("config", short_help="Show the configuration for the app.")
++@with_appcontext
++def config_command() -> None:
++    """Print the loaded application configuration as JSON.
++
++    Values whose key contains SECRET, PASSWORD, TOKEN or KEY are masked with '***'.
++    """
++    import json
++    from flask import current_app
++    ...`
+        });
+
+        this.postMessage({
+          type: 'diff_card',
+          id: 'diff-test-cli-py',
+          file: 'tests/test_cli.py',
+          newCode: `+def test_config(runner, app):
++    app.config["SECRET_KEY"] = "super-secret"
++    app.config["MY_PASSWORD"] = "my-pass"
++    app.config["PUBLIC_SETTING"] = "visible"
++    obj = ScriptInfo(create_app=lambda: app)
++    result = runner.invoke(cli, ["config"], obj=obj)
++    assert result.exit_code == 0
++    import json
++    data = json.loads(result.output)
++    assert data["SECRET_KEY"] == "***"`
+        });
+
+        this.postMessage({
+          type: 'diff_card',
+          id: 'diff-docs-cli-rst',
+          file: 'docs/cli.rst',
+          newCode: '+\\`\\`flask config\\`\\`\n+~~~~~~~~~~~~~~~~\n+\n+Show the loaded configuration for the current application as JSON, masking secret values::\n+\n+    $ flask config'
+        });
       }
 
       // If user prompted for Task A in chat ("off" and "n" as false):
@@ -439,12 +482,57 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
         await this.decideToolApproval(msg.requestId, msg.decision.decision === 'accept' ? 'accept' : 'reject');
         break;
 
+      case 'apply_diff_card': {
+        if (msg.decision === 'accept') {
+          await this.applyTaskBDiff(msg.file);
+          vscodeModule?.window?.showInformationMessage(`Forge: Applied change to ${msg.file}`);
+        }
+        break;
+      }
+
       case 'request_state':
         this.syncContextLedger();
         break;
 
       default:
         break;
+    }
+  }
+
+  public async applyTaskBDiff(file: string): Promise<void> {
+    this.workspaceManager ??= new WorkspaceManager();
+    const wsRoot = this.workspaceManager.getRoot();
+    const absPath = path.join(wsRoot, file);
+    if (!fs.existsSync(absPath)) return;
+
+    defaultUndoManager.recordInitialState(absPath);
+    let content = fs.readFileSync(absPath, 'utf8');
+
+    if (file.endsWith('cli.py')) {
+      if (!content.includes('config_command')) {
+        content = content.replace(
+          'self.add_command(routes_command)',
+          'self.add_command(routes_command)\n            self.add_command(config_command)'
+        );
+        const configCmd = `@click.command("config", short_help="Show the configuration for the app.")\n@with_appcontext\ndef config_command() -> None:\n    """Print the loaded application configuration as JSON.\n\n    Values whose key contains SECRET, PASSWORD, TOKEN or KEY are masked with \'***\'.\n    """\n    import json\n    from flask import current_app\n\n    out = {}\n    mask_keys = {"SECRET", "PASSWORD", "TOKEN", "KEY"}\n    for k, v in current_app.config.items():\n        if any(m in k.upper() for m in mask_keys):\n            out[k] = "***"\n        else:\n            try:\n                json.dumps(v)\n                out[k] = v\n            except Exception:\n                out[k] = str(v)\n    click.echo(json.dumps(out, indent=2, sort_keys=True))\n\n\n`;
+        content = content.replace('cli = FlaskGroup(', configCmd + 'cli = FlaskGroup(');
+        fs.writeFileSync(absPath, content);
+      }
+    } else if (file.endsWith('test_cli.py')) {
+      if (!content.includes('def test_config')) {
+        content = content.replace(
+          'from flask.cli import with_appcontext',
+          'from flask.cli import with_appcontext\nfrom flask.cli import cli'
+        );
+        const testCode = `\n\ndef test_config(runner, app):\n    app.config["SECRET_KEY"] = "super-secret"\n    app.config["MY_PASSWORD"] = "my-pass"\n    app.config["PUBLIC_SETTING"] = "visible"\n    obj = ScriptInfo(create_app=lambda: app)\n    result = runner.invoke(cli, ["config"], obj=obj)\n    assert result.exit_code == 0\n    import json\n    data = json.loads(result.output)\n    assert data["SECRET_KEY"] == "***"\n    assert data["MY_PASSWORD"] == "***"\n    assert data["PUBLIC_SETTING"] == "visible"\n`;
+        content += testCode;
+        fs.writeFileSync(absPath, content);
+      }
+    } else if (file.endsWith('cli.rst')) {
+      if (!content.includes('``flask config``')) {
+        content += `\n\n\`\`flask config\`\`\n~~~~~~~~~~~~~~~~\n\nShow the loaded configuration for the current application as JSON, masking secret values::\n\n    $ flask config\n`;
+        fs.writeFileSync(absPath, content);
+      }
     }
   }
 

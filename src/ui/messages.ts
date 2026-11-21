@@ -23,6 +23,7 @@ export interface WebviewBudgetMeter {
 export type WebviewIncomingMessage =
   | { type: 'submit_prompt'; prompt: string; mentions?: string[] }
   | { type: 'approve_tool'; requestId: string; decision: HunkDecision }
+  | { type: 'apply_diff_card'; id: string; file: string; decision: 'accept' | 'reject' }
   | { type: 'cancel_run' }
   | { type: 'undo_task' }
   | { type: 'open_session' }
@@ -44,6 +45,14 @@ export type WebviewOutgoingMessage =
     }
   | { type: 'budget_update'; budget: BudgetState }
   | { type: 'approval_required'; requestId: string; toolName: string; args: Record<string, unknown> }
+  | {
+      type: 'diff_card';
+      id: string;
+      file: string;
+      oldCode?: string;
+      newCode: string;
+      status?: 'pending' | 'applied' | 'rejected';
+    }
   | { type: 'run_started' }
   | { type: 'run_completed'; status: 'completed' | 'cancelled' | 'failed' }
   | { type: 'error'; message: string };

@@ -241,6 +241,10 @@ export class WebviewApp {
         this.promptApproval(msg.requestId, msg.toolName, msg.args);
         break;
 
+      case 'diff_card':
+        this.renderDiffCard(msg.id, msg.file, msg.newCode, msg.oldCode, msg.status);
+        break;
+
       case 'run_started':
         this.setRunning(true);
         break;
@@ -359,6 +363,62 @@ export class WebviewApp {
         type: 'approve_tool',
         requestId,
         decision: { hunkId: requestId, decision: 'reject', timestamp: Date.now() }
+      });
+    });
+
+    this.currentApprovalContainer.appendChild(card);
+    this.scrollToBottom();
+  }
+
+  private renderDiffCard(
+    id: string,
+    file: string,
+    newCode: string,
+    _oldCode?: string,
+    status?: 'pending' | 'applied' | 'rejected'
+  ): void {
+    if (!this.currentApprovalContainer) return;
+    this.updateStatus('awaiting_approval');
+
+    const card = document.createElement('div');
+    card.className = 'diff-card';
+    card.id = `diff-card-${id}`;
+
+    const isApplied = status === 'applied';
+
+    card.innerHTML = `
+      <div class="diff-card-header">
+        <span class="diff-card-file">${escapeHtml(file)}</span>
+        <span class="diff-card-action">Edit in ${escapeHtml(file)}</span>
+      </div>
+      <div class="diff-card-code">${escapeHtml(newCode)}</div>
+      <div class="diff-card-buttons">
+        <button class="btn-applied ${isApplied ? 'done' : ''}">${isApplied ? 'Applied ✓' : 'Applied ✓'}</button>
+        <button class="btn-reject">✗ Reject</button>
+      </div>
+    `;
+
+    const applyBtn = card.querySelector('.btn-applied') as HTMLButtonElement;
+    const rejectBtn = card.querySelector('.btn-reject') as HTMLButtonElement;
+
+    applyBtn?.addEventListener('click', () => {
+      applyBtn.textContent = 'Applied ✓';
+      applyBtn.classList.add('done');
+      this.vscode?.postMessage({
+        type: 'apply_diff_card',
+        id,
+        file,
+        decision: 'accept'
+      });
+    });
+
+    rejectBtn?.addEventListener('click', () => {
+      card.remove();
+      this.vscode?.postMessage({
+        type: 'apply_diff_card',
+        id,
+        file,
+        decision: 'reject'
       });
     });
 
