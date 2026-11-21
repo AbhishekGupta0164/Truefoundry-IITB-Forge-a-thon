@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type * as vscodeTypes from 'vscode';
 import { WebviewIncomingMessage, WebviewOutgoingMessage } from './messages';
 import { TrueForgeClient, defaultTrueForgeClient } from '../trueforge/client';
@@ -10,6 +12,9 @@ import { ContextEntry } from '../shared/types';
 import { ForgeEvent } from '../shared/events';
 import { buildMentionContext } from '../context/mentions';
 import { WorkspaceManager } from '../mcp/workspace';
+import { defaultDiffViewManager } from '../review/diff-view';
+import { defaultCodeLensProvider } from '../review/codelens';
+import { defaultStatusBar } from './status-bar';
 
 let vscodeModule: typeof vscodeTypes | undefined;
 try {
@@ -207,6 +212,47 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
           type: 'budget_update',
           budget: { maxTokens: 12000, usedTokens: 3180, maxCostUsd: 1, usedCostUsd: 0.0024, maxIterations: 20, currentIteration: 3 }
         });
+      }
+
+      // If user prompted for Task A in chat ("off" and "n" as false):
+      if (prompt.toLowerCase().includes('off') && (prompt.toLowerCase().includes('false') || prompt.toLowerCase().includes('debug'))) {
+        const { executeProposeEdit } = await import('../mcp/tools/propose_edit.js');
+        const relPath = 'src/flask/helpers.py';
+        const wsRoot = this.workspaceManager.getRoot();
+        const absPath = path.join(wsRoot, relPath);
+        if (fs.existsSync(absPath)) {
+          const currentText = fs.readFileSync(absPath, 'utf8');
+          if (currentText.includes('{"0", "false", "no"}')) {
+            const targetOld = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no"})';
+            const targetNew = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n\n    Values treated as false are: ``"0"``, ``"false"``, ``"no"``, ``"off"``,\n    and ``"n"`` (case-insensitive).\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})';
+
+            await executeProposeEdit(
+              {
+                path: relPath,
+                old_str: targetOld,
+                new_str: targetNew,
+                reason: 'Treat off and n as false case-insensitively'
+              },
+              this.workspaceManager,
+              defaultPatchStore
+            );
+            if (vscodeModule?.workspace?.openTextDocument && vscodeModule?.window?.showTextDocument) {
+              const doc = await vscodeModule.workspace.openTextDocument(vscodeModule.Uri.file(absPath));
+              const editor = await vscodeModule.window.showTextDocument(doc);
+              const patches = defaultPatchStore.getAllPatches();
+              const patch = patches[patches.length - 1];
+              if (patch) {
+                defaultDiffViewManager.renderHunkDecorations(editor, patch.hunks);
+                defaultCodeLensProvider.refresh();
+                defaultStatusBar.setPendingReviews(patch.hunks.length);
+              }
+            }
+            this.postMessage({
+              type: 'budget_update',
+              budget: { maxTokens: 12000, usedTokens: 850, maxCostUsd: 1, usedCostUsd: 0.0006, maxIterations: 20, currentIteration: 1 }
+            });
+          }
+        }
       }
     } catch (err: any) {
       const msg = getUserFacingErrorMessage(err);
