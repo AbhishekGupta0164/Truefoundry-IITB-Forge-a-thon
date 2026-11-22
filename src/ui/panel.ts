@@ -524,7 +524,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
     defaultUndoManager.recordInitialState(absPath);
     let content = fs.readFileSync(absPath, 'utf8');
 
-    if (file.endsWith('test_cli.py')) {
+    if (file === 'tests/test_cli.py' || file.endsWith('/tests/test_cli.py')) {
       if (!content.includes('def test_config')) {
         content = content.replace(
           'from flask.cli import with_appcontext',
@@ -534,7 +534,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
         content += testCode;
         fs.writeFileSync(absPath, content);
       }
-    } else if (file.endsWith('src/flask/cli.py') || (!file.includes('test') && file.endsWith('cli.py'))) {
+    } else if (file === 'src/flask/cli.py' || file.endsWith('/src/flask/cli.py')) {
       if (!content.includes('config_command')) {
         content = content.replace(
           'self.add_command(routes_command)',
