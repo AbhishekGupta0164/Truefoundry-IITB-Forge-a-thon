@@ -515,7 +515,10 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
   public async applyTaskBDiff(file: string): Promise<void> {
     this.workspaceManager ??= new WorkspaceManager();
     const wsRoot = this.workspaceManager.getRoot();
-    const absPath = path.join(wsRoot, file);
+    let absPath = path.join(wsRoot, file);
+    if (!fs.existsSync(absPath)) {
+      absPath = path.join(wsRoot, 'flask', file);
+    }
     if (!fs.existsSync(absPath)) return;
 
     defaultUndoManager.recordInitialState(absPath);
