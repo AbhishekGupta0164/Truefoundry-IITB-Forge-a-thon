@@ -94,12 +94,12 @@
         },
         "forge.model": {
           "type": "string",
-          "default": "google-gemini/gemini-3-8-flash",
+          "default": "ollama/llama-3-2-3b",
           "description": "Primary TrueForge model as \"provider/model\", exactly as listed in TrueForge Settings > Models"
         },
         "forge.fallbackModel": {
           "type": "string",
-          "default": "ollama/llama-3-2-3b",
+          "default": "",
           "description": "Second TrueForge model (\"provider/model\", different from forge.model). Used automatically when a run on the primary model fails before any tool call. Empty disables fallback."
         },
         "forge.temperature": {

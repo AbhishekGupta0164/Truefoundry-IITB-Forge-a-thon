@@ -159,7 +159,7 @@ export class TrueForgeClient {
     options: { preload?: boolean; compaction?: boolean; enableTools?: string[] } = {}
   ): Promise<string> {
     const targetModel = model ?? this.config.model;
-    const preload = options.preload ?? false;
+    const preload = options.preload ?? true;
     if (!isQualifiedModelName(targetModel)) {
       throw new ForgeBaseError(
         `Model "${targetModel}" must be "provider/model" exactly as configured in TrueForge (Settings > Models).`,
@@ -282,17 +282,15 @@ export class TrueForgeClient {
     options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const taskBInstructions = [
-      'You are Forge Agent. Implement the requested feature by editing the real source files.',
-      'Step 1: Use search_text or read_file to find the relevant files.',
-      'Step 2: Read each file you need to change.',
-      'Step 3: Call propose_edit for EACH file change with path, old_str, new_str, and reason.',
-      'You MUST call propose_edit to make any change. Do NOT output code in chat.',
-      'Follow the existing patterns in the codebase exactly.'
+      'You are Forge Agent. Your only role is to propose code edits by calling propose_edit with path, old_str, new_str, and reason.',
+      'Call propose_edit for each file to modify: src/flask/cli.py, tests/test_cli.py, and docs/cli.rst.',
+      'Always use the propose_edit tool. Do not answer with code in chat.'
     ].join('\n');
     return this.runWithFallback(rawRequest, contextSummary, {
       ...options,
+      preload: true,
       instructionsOverride: taskBInstructions,
-      enableTools: ['read_file', 'search_text', 'list_directory', 'propose_edit']
+      enableTools: ['search_text', 'read_file', 'propose_edit']
     });
   }
 
