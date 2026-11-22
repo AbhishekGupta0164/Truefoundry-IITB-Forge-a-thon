@@ -172,8 +172,8 @@ export class TrueForgeClient {
       'When adding a feature, find the closest existing example, then change the implementation, a test and the docs, mirroring how the existing example is registered, tested and documented. Always pass a reason. Be brief.',
       'Search before reading. Read the implementation, tests and docs before proposing an edit.',
       'Never invent a path.',
-      'Never write except by calling apply_patch_hunk once per hunk.',
-      'Do not use the terminal to edit files.',
+      'IMPORTANT: To write any file change, you MUST call the propose_edit tool with path, old_str, new_str, and reason. Never output code in chat.',
+      'Call propose_edit once per hunk. Do not use the terminal to edit files.',
       'Never read .env or secret files. Respect the retrieved-context budget.'
     ].join('\n');
 
@@ -281,7 +281,19 @@ export class TrueForgeClient {
     contextSummary?: string,
     options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    return this.runWithFallback(rawRequest, contextSummary, options);
+    const taskBInstructions = [
+      'You are Forge Agent. Implement the requested feature by editing the real source files.',
+      'Step 1: Use search_text or read_file to find the relevant files.',
+      'Step 2: Read each file you need to change.',
+      'Step 3: Call propose_edit for EACH file change with path, old_str, new_str, and reason.',
+      'You MUST call propose_edit to make any change. Do NOT output code in chat.',
+      'Follow the existing patterns in the codebase exactly.'
+    ].join('\n');
+    return this.runWithFallback(rawRequest, contextSummary, {
+      ...options,
+      instructionsOverride: taskBInstructions,
+      enableTools: ['read_file', 'search_text', 'list_directory', 'propose_edit']
+    });
   }
 
   /** Subscribe to automatic primary -> fallback model switches. Returns an unsubscribe function. */
