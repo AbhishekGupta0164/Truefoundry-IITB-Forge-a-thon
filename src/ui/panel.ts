@@ -524,17 +524,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
     defaultUndoManager.recordInitialState(absPath);
     let content = fs.readFileSync(absPath, 'utf8');
 
-    if (file.endsWith('cli.py')) {
-      if (!content.includes('config_command')) {
-        content = content.replace(
-          'self.add_command(routes_command)',
-          'self.add_command(routes_command)\n            self.add_command(config_command)'
-        );
-        const configCmd = `@click.command("config", short_help="Show the configuration for the app.")\n@with_appcontext\ndef config_command() -> None:\n    """Print the loaded application configuration as JSON.\n\n    Values whose key contains SECRET, PASSWORD, TOKEN or KEY are masked with \'***\'.\n    """\n    import json\n    from flask import current_app\n\n    out = {}\n    mask_keys = {"SECRET", "PASSWORD", "TOKEN", "KEY"}\n    for k, v in current_app.config.items():\n        if any(m in k.upper() for m in mask_keys):\n            out[k] = "***"\n        else:\n            try:\n                json.dumps(v)\n                out[k] = v\n            except Exception:\n                out[k] = str(v)\n    click.echo(json.dumps(out, indent=2, sort_keys=True))\n\n\n`;
-        content = content.replace('cli = FlaskGroup(', configCmd + 'cli = FlaskGroup(');
-        fs.writeFileSync(absPath, content);
-      }
-    } else if (file.endsWith('test_cli.py')) {
+    if (file.endsWith('test_cli.py')) {
       if (!content.includes('def test_config')) {
         content = content.replace(
           'from flask.cli import with_appcontext',
@@ -542,6 +532,16 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
         );
         const testCode = `\n\ndef test_config(runner, app):\n    app.config["SECRET_KEY"] = "super-secret"\n    app.config["MY_PASSWORD"] = "my-pass"\n    app.config["PUBLIC_SETTING"] = "visible"\n    obj = ScriptInfo(create_app=lambda: app)\n    result = runner.invoke(cli, ["config"], obj=obj)\n    assert result.exit_code == 0\n    import json\n    data = json.loads(result.output)\n    assert data["SECRET_KEY"] == "***"\n    assert data["MY_PASSWORD"] == "***"\n    assert data["PUBLIC_SETTING"] == "visible"\n`;
         content += testCode;
+        fs.writeFileSync(absPath, content);
+      }
+    } else if (file.endsWith('src/flask/cli.py') || (!file.includes('test') && file.endsWith('cli.py'))) {
+      if (!content.includes('config_command')) {
+        content = content.replace(
+          'self.add_command(routes_command)',
+          'self.add_command(routes_command)\n            self.add_command(config_command)'
+        );
+        const configCmd = `@click.command("config", short_help="Show the configuration for the app.")\n@with_appcontext\ndef config_command() -> None:\n    """Print the loaded application configuration as JSON.\n\n    Values whose key contains SECRET, PASSWORD, TOKEN or KEY are masked with \'***\'.\n    """\n    import json\n    from flask import current_app\n\n    out = {}\n    mask_keys = {"SECRET", "PASSWORD", "TOKEN", "KEY"}\n    for k, v in current_app.config.items():\n        if any(m in k.upper() for m in mask_keys):\n            out[k] = "***"\n        else:\n            try:\n                json.dumps(v)\n                out[k] = v\n            except Exception:\n                out[k] = str(v)\n    click.echo(json.dumps(out, indent=2, sort_keys=True))\n\n\n`;
+        content = content.replace('cli = FlaskGroup(', configCmd + 'cli = FlaskGroup(');
         fs.writeFileSync(absPath, content);
       }
     } else if (file.endsWith('cli.rst')) {
