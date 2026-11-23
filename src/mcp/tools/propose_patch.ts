@@ -4,6 +4,7 @@ import { WorkspaceManager } from '../workspace';
 import { PatchStore, defaultPatchStore, StagedHunk, StagedPatch } from '../../review/store';
 import { validateHunk } from '../../shared/validation';
 import { sanitizeToolOutput } from '../sanitize';
+import { defaultCancelManager } from '../../review/cancel';
 
 export interface ProposePatchParams {
   target_file: string;
@@ -25,6 +26,8 @@ export async function executeProposePatch(
   workspaceManager: WorkspaceManager,
   patchStore: PatchStore = defaultPatchStore
 ): Promise<ProposePatchResult> {
+  defaultCancelManager.assertNotCancelled();
+
   const { target_file, patch: patchText, summary } = params;
 
   if (!target_file || typeof target_file !== 'string') {

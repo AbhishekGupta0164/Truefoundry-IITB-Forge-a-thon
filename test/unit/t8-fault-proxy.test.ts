@@ -26,13 +26,17 @@ describe('T8: Fault-Injection Proxy Suite (Task C & Resilience)', () => {
     }
   }
 
+  const initialGitStatus = flaskDir
+    ? execFileSync('git', ['status', '--porcelain'], { cwd: flaskDir, encoding: 'utf-8' }).trim()
+    : '';
+
   const assertCleanWorkspace = () => {
     if (flaskDir) {
       const gitStatus = execFileSync('git', ['status', '--porcelain'], {
         cwd: flaskDir,
         encoding: 'utf-8'
       }).trim();
-      expect(gitStatus).toBe('');
+      expect(gitStatus).toBe(initialGitStatus);
     }
   };
 

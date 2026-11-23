@@ -5,7 +5,7 @@ const LABELS: Record<RunState, string> = {
   running: 'Running…',
   awaiting_approval: 'Waiting for your approval',
   completed: 'Done',
-  cancelled: 'Cancelled: no unapproved edits were written',
+  cancelled: 'Cancelled',
   failed: 'Failed'
 };
 

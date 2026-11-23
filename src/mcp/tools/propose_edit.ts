@@ -5,6 +5,7 @@ import { WorkspaceManager } from '../workspace';
 import { PatchStore, defaultPatchStore, StagedHunk, StagedPatch } from '../../review/store';
 import { sanitizeToolOutput } from '../sanitize';
 import { defaultSessionStateManager } from '../../trueforge/session-state';
+import { defaultCancelManager } from '../../review/cancel';
 import { matchAndReplace, repairProposeEditArgs, buildHunkDependencyGraph } from '../../review/matcher';
 import { validatePythonSource } from '../../review/validate';
 
@@ -61,6 +62,8 @@ export async function executeProposeEdit(
   workspaceManager: WorkspaceManager,
   patchStore: PatchStore = defaultPatchStore
 ): Promise<ProposeEditResult> {
+  defaultCancelManager.assertNotCancelled();
+
   // 1. Tool-Call Repair: normalize malformed arguments, aliases, leading slashes
   const repaired = repairProposeEditArgs(params);
   const relativePath = repaired.path;

@@ -190,6 +190,19 @@ export class DiffViewManager {
     }
   }
 
+  /** Close only Forge's virtual review diff tabs when a run is cancelled. */
+  public async closeReviewEditors(): Promise<void> {
+    const tabGroups = vscodeModule?.window?.tabGroups;
+    if (!tabGroups) return;
+
+    const reviewTabs = tabGroups.all.flatMap((group) => group.tabs.filter((tab) => {
+      const input = tab.input as vscodeTypes.TabInputTextDiff;
+      return input?.original?.scheme === ORIGINAL_SCHEME || input?.modified?.scheme === PROPOSED_SCHEME;
+    }));
+
+    if (reviewTabs.length > 0) await tabGroups.close(reviewTabs, true);
+  }
+
   public dispose(): void {
     this.addedDecorationType?.dispose();
     this.removedDecorationType?.dispose();

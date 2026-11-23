@@ -91,7 +91,7 @@ describe('Agent panel sends mentions as context', () => {
     await panel.submitRawPrompt('Rename the command in @src/pkg/cli.py');
 
     expect(runTaskB).toHaveBeenCalledWith('Rename the command in', expect.stringContaining('### @file: src/pkg/cli.py'));
-    expect(posted[1]).toEqual({ type: 'run_started' });
+    expect(posted[0]).toEqual({ type: 'run_started' });
     expect(posted.find((m) => m.type === 'context_update')).toMatchObject({ entries: [expect.objectContaining({ uri: 'src/pkg/cli.py' })] });
     expect(posted[posted.length - 1]).toEqual({ type: 'run_completed', status: 'completed' });
   });

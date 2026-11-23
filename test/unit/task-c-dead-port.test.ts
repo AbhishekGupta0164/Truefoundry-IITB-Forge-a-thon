@@ -32,6 +32,9 @@ describe('Step 5: Task C Dead-Port Failure and Invalid-Key Baseline', () => {
   }
 
   it('demonstrates closed port 9 retry behavior and single-sentence error', async () => {
+    const initialGitStatus = flaskDir
+      ? execFileSync('git', ['status', '--porcelain'], { cwd: flaskDir, encoding: 'utf-8' }).trim()
+      : '';
     const deadPortUrl = 'http://127.0.0.1:9/v1';
     const retryEvents: { attempt: number; delay: number }[] = [];
 
@@ -69,11 +72,14 @@ describe('Step 5: Task C Dead-Port Failure and Invalid-Key Baseline', () => {
         cwd: flaskDir,
         encoding: 'utf-8'
       }).trim();
-      expect(gitStatus).toBe('');
+      expect(gitStatus).toBe(initialGitStatus);
     }
   }, 25000);
 
   it('demonstrates invalid API key fails immediately without retry', async () => {
+    const initialGitStatus = flaskDir
+      ? execFileSync('git', ['status', '--porcelain'], { cwd: flaskDir, encoding: 'utf-8' }).trim()
+      : '';
     let attempts = 0;
     let caughtError: unknown;
 
@@ -101,7 +107,7 @@ describe('Step 5: Task C Dead-Port Failure and Invalid-Key Baseline', () => {
         cwd: flaskDir,
         encoding: 'utf-8'
       }).trim();
-      expect(gitStatus).toBe('');
+      expect(gitStatus).toBe(initialGitStatus);
     }
   });
 });

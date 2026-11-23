@@ -159,7 +159,7 @@ export class TrueForgeClient {
     options: { preload?: boolean; compaction?: boolean; enableTools?: string[] } = {}
   ): Promise<string> {
     const targetModel = model ?? this.config.model;
-    const preload = options.preload ?? true;
+    const preload = options.preload ?? false;
     if (!isQualifiedModelName(targetModel)) {
       throw new ForgeBaseError(
         `Model "${targetModel}" must be "provider/model" exactly as configured in TrueForge (Settings > Models).`,
@@ -263,11 +263,11 @@ export class TrueForgeClient {
     const filePath = params.filePath;
     const instruction = params.instruction;
 
-    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Selected source text:\n${params.selectedText}\nInstruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
 
     return this.runWithFallback(prompt, undefined, {
       preload: true,
-      enableTools: ['read_file', 'propose_edit'],
+      enableTools: ['read_file', 'propose_edit', 'apply_patch_hunk'],
       instructionsOverride: 'You are Forge Agent. Your only role is to propose code edits by calling propose_edit with path, old_str, new_str, and reason. Always use the propose_edit tool.'
     });
   }
@@ -283,14 +283,15 @@ export class TrueForgeClient {
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
     const taskBInstructions = [
       'You are Forge Agent. Your only role is to propose code edits by calling propose_edit with path, old_str, new_str, and reason.',
-      'Call propose_edit for each file to modify: src/flask/cli.py, tests/test_cli.py, and docs/cli.rst.',
-      'Always use the propose_edit tool. Do not answer with code in chat.'
+      'Discover relevant implementation, tests, and documentation files from the workspace. Do not assume filenames; search first, then read only the ranges needed.',
+      'After proposing changes, call apply_patch_hunk for each proposed hunk using the returned patch and hunk IDs. This tool requires the user to approve each hunk; wait for that approval before continuing.',
+      'Always use propose_edit for changes. Do not answer with code in chat and never use terminal commands to write files.'
     ].join('\n');
     return this.runWithFallback(rawRequest, contextSummary, {
       ...options,
-      preload: true,
+      preload: false,
       instructionsOverride: taskBInstructions,
-      enableTools: ['search_text', 'read_file', 'propose_edit']
+      enableTools: ['search_text', 'search_symbols', 'find_related', 'read_file', 'propose_edit', 'apply_patch_hunk']
     });
   }
 

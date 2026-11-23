@@ -127,7 +127,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test",
     "test:unit": "vitest run",
-    "test:e2e": "vscode-test",
+    "test:e2e": "vitest run test/e2e",
     "eval": "tsx eval/run.ts",
     "start:all": "node scripts/start-all.mjs",
     "package": "vsce package --no-dependencies",

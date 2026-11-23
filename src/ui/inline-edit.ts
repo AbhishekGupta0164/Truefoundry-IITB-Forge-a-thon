@@ -6,6 +6,7 @@ import { executeApplyPatchHunk } from '../mcp/tools/apply_patch_hunk';
 import { defaultDiffViewManager } from '../review/diff-view';
 import { defaultCodeLensProvider } from '../review/codelens';
 import { defaultUndoManager } from '../review/undo';
+import { defaultCancelManager } from '../review/cancel';
 import { defaultStatusBar } from './status-bar';
 import { runPostAcceptCheck } from '../verify/post-accept';
 import { TrueForgeClient, defaultTrueForgeClient } from '../trueforge/client';
@@ -35,7 +36,7 @@ export class InlineEditController {
     this.patchStore = options.patchStore ?? defaultPatchStore;
     this.trueforgeClient = options.trueforgeClient ?? defaultTrueForgeClient;
 
-    this.trueforgeClient.onModelFallback((info) => {
+    this.trueforgeClient.onModelFallback?.((info) => {
       defaultStatusBar.setWorking(`Switched to fallback (${info.to})...`);
     });
   }
@@ -65,6 +66,7 @@ export class InlineEditController {
 
     const selectedText = document.getText(selection);
     const filePath = document.uri.fsPath;
+    const relativeFilePath = path.relative(this.workspaceManager.getRoot(), filePath).replace(/\\/g, '/');
 
     // Prompt user for instruction
     const instruction = await vscodeModule.window.showInputBox({
@@ -79,46 +81,16 @@ export class InlineEditController {
     }
 
     defaultStatusBar.setWorking('TrueForge: Agent reasoning...');
+    defaultCancelManager.reset();
 
-    // Live sync to Agent Panel: post prompt, initial tool logs, and context
+    // Mark the inline run in the panel. Tool and context events below come from the live stream.
     try {
       const { defaultAgentPanel } = await import('./panel.js');
+      defaultAgentPanel.contextLedger.clear();
+      defaultAgentPanel.syncContextLedger();
       defaultAgentPanel.postMessage({
         type: 'run_started',
         prompt: instruction
-      });
-      defaultAgentPanel.postMessage({
-        type: 'context_update',
-        entries: [
-          {
-            id: 'ctx-helpers-py',
-            type: 'file',
-            uri: 'src/flask/helpers.py',
-            content: '',
-            tokenCount: 297,
-            metadata: { tool: 'read_file', reason: 'Selected get_debug_flag (lines 28-34)' }
-          }
-        ]
-      });
-      defaultAgentPanel.postMessage({
-        type: 'tool_call',
-        toolCallId: 'tool-read-helpers',
-        name: 'read_file',
-        arguments: { path: 'src/flask/helpers.py' }
-      });
-      defaultAgentPanel.postMessage({
-        type: 'tool_result',
-        result: { toolCallId: 'tool-read-helpers', name: 'read_file', success: true, output: 'Read src/flask/helpers.py' }
-      });
-      defaultAgentPanel.postMessage({
-        type: 'tool_call',
-        toolCallId: 'tool-propose-helpers',
-        name: 'propose_diff',
-        arguments: { path: 'src/flask/helpers.py', reason: instruction }
-      });
-      defaultAgentPanel.postMessage({
-        type: 'budget_update',
-        budget: { maxTokens: 12000, usedTokens: 297, maxCostUsd: 1, usedCostUsd: 0.0006, maxIterations: 20, currentIteration: 1 }
       });
     } catch {
       // panel not open
@@ -139,68 +111,19 @@ export class InlineEditController {
       };
 
       // Dispatch to TrueForge session
-      try {
-        const stream = await this.trueforgeClient.runTaskA({
-          filePath,
-          selectionRange,
-          selectedText,
-          instruction,
-          fullContent: document.getText()
-        });
-
-        for await (const event of stream) {
-          if (event.type === 'token') {
-            defaultStatusBar.setWorking('TrueForge: Generating edit...');
-          } else if (event.type === 'tool_call') {
-            defaultStatusBar.setWorking(`TrueForge: ${event.name}...`);
-          } else if (event.type === 'error') {
-            console.warn(`[Forge InlineEdit] Model stream reported: ${event.message}`);
-            break;
-          }
-        }
-      } catch (err: any) {
-        console.warn(`[Forge InlineEdit] Live stream encountered issue: ${err.message}`);
-      }
+      const stream = await this.trueforgeClient.runTaskA({
+        filePath: relativeFilePath,
+        selectionRange,
+        selectedText,
+        instruction,
+        fullContent: document.getText()
+      });
+      const { defaultAgentPanel } = await import('./panel.js');
+      await defaultAgentPanel.consumeStream(stream);
 
       // Check PatchStore for the patch received via propose_edit over MCP
       const patchesAfter = this.patchStore.getAllPatches();
-      let newPatch =
-        patchesAfter.find(p => !patchesBefore.has(p.id)) ||
-        patchesAfter[patchesAfter.length - 1];
-
-      // Fallback: If model did not issue MCP tool call (e.g. smaller local model answered in text),
-      // stage the edit so the diff and Accept / Reject CodeLens ALWAYS appear in the editor!
-      if (!newPatch || newPatch.hunks.length === 0) {
-        const currentText = document.getText();
-        if (
-          (filePath.endsWith('helpers.py') || instruction.toLowerCase().includes('off') || instruction.toLowerCase().includes('debug')) &&
-          currentText.includes('{"0", "false", "no"}')
-        ) {
-          const { executeProposeEdit } = await import('../mcp/tools/propose_edit.js');
-          let relPath = path.relative(this.workspaceManager.getRoot(), filePath);
-          // If relative path cannot be resolved from root, check if flask subfolder exists
-          const checkAbs = path.resolve(this.workspaceManager.getRoot(), relPath);
-          if (!require('fs').existsSync(checkAbs)) {
-            relPath = filePath;
-          }
-
-          const targetOld = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no"})';
-          const targetNew = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n\n    Values treated as false are: ``"0"``, ``"false"``, ``"no"``, ``"off"``,\n    and ``"n"`` (case-insensitive).\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})';
-
-          await executeProposeEdit(
-            {
-              path: relPath,
-              old_str: targetOld,
-              new_str: targetNew,
-              reason: 'Treat values off and n as false case-insensitively'
-            },
-            this.workspaceManager,
-            this.patchStore
-          );
-          const updatedPatches = this.patchStore.getAllPatches();
-          newPatch = updatedPatches[updatedPatches.length - 1];
-        }
-      }
+      const newPatch = patchesAfter.find(p => !patchesBefore.has(p.id));
 
       if (newPatch && newPatch.hunks.length > 0) {
         let activeEditor = editor;
@@ -212,33 +135,6 @@ export class InlineEditController {
         defaultCodeLensProvider.refresh();
         defaultStatusBar.setPendingReviews(newPatch.hunks.length);
 
-        // Sync completed diff and status to Agent Panel
-        try {
-          const { defaultAgentPanel } = await import('./panel.js');
-          defaultAgentPanel.postMessage({
-            type: 'tool_result',
-            result: { toolCallId: 'tool-propose-helpers', name: 'propose_diff', success: true, output: `Proposed ${newPatch.hunks.length} hunks` }
-          });
-          defaultAgentPanel.postMessage({
-            type: 'diff_card',
-            id: 'diff-helpers-py',
-            file: 'src/flask/helpers.py',
-            newCode: `    val = os.environ.get("FLASK_DEBUG")
--    return bool(val and val.lower() not in {"0", "false", "no"})
-+    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})`
-          });
-          defaultAgentPanel.postMessage({
-            type: 'budget_update',
-            budget: { maxTokens: 12000, usedTokens: 850, maxCostUsd: 1, usedCostUsd: 0.0018, maxIterations: 20, currentIteration: 2 }
-          });
-          defaultAgentPanel.postMessage({
-            type: 'run_completed',
-            status: 'completed'
-          });
-        } catch {
-          // panel not open
-        }
-
         vscodeModule.window.showInformationMessage(
           `Forge: Proposed ${newPatch.hunks.length} hunk(s). Review above with Accept / Reject.`
         );
@@ -247,7 +143,15 @@ export class InlineEditController {
         defaultStatusBar.setReady();
       }
     } catch (err: any) {
-      vscodeModule.window.showErrorMessage(getUserFacingErrorMessage(err));
+      const message = getUserFacingErrorMessage(err);
+      vscodeModule.window.showErrorMessage(message);
+      try {
+        const { defaultAgentPanel } = await import('./panel.js');
+        defaultAgentPanel.postMessage({ type: 'error', message });
+        defaultAgentPanel.postMessage({ type: 'run_completed', status: 'failed' });
+      } catch {
+        // The panel may not be available in a non-standard extension host.
+      }
       defaultStatusBar.setReady();
     }
   }
