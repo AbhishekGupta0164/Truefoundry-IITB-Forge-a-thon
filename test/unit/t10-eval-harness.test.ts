@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { scoreTaskA, scoreTaskB, computeMatrixRow, SingleRun } from '../../eval/rubric';
 
-describe('T10: Real Evaluation Harness & Machine-Scored Rubric', () => {
+describe('Evaluation rubric helpers (fixture-based unit tests)', () => {
   describe('Task A Rubric Scorer', () => {
     it('passes for valid Python code with proper docstring and case-insensitive false check', () => {
       const code = [

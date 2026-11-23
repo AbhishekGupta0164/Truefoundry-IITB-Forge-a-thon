@@ -18,6 +18,13 @@ describe('Task T0: Pinned TrueForge Version Configuration', () => {
     }
   });
 
+  it('pins the SDK dependency to the version recorded in the lockfile', () => {
+    const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8'));
+    const lockJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package-lock.json'), 'utf8'));
+    expect(packageJson.dependencies['@truefoundry/trueforge-sdk']).toBe('0.184.1');
+    expect(lockJson.packages[''].dependencies['@truefoundry/trueforge-sdk']).toBe('0.184.1');
+  });
+
   it('defaults trueforgeVersion to 0.184.3', () => {
     const config = getTrueForgeConfig();
     expect(config.trueforgeVersion).toBe('0.184.3');

@@ -31,8 +31,8 @@ The TrueForge module is the single, isolated gateway responsible for all network
 ## 6. Testing Requirements
 - Unit tests under `test/unit/` using `vitest`:
   - `retry.test.ts`: Retry on connection drops, immediate failure on `BadCredentialError`.
-  - `approvals.test.ts`: Mapping tool call approval decisions to correct payload shapes.
-- Mock server tests via `test/helpers/fake-trueforge.ts`.
+  - `stage3-review-engine.test.ts` and `sdk-event-mapping.test.ts`: Approval matching, SDK payload shape, and paused-turn resume behavior.
+- SDK event and approval tests use `test/helpers/trueforge-sdk-mock.ts`; these verify request/event contracts and are not live daemon evidence.
 
 ## 7. Module Completion Criteria
 1. Reconnects seamlessly after a transient network drop.

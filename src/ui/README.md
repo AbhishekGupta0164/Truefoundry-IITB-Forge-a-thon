@@ -34,7 +34,7 @@ Houses the developer-facing UI components inside VS Code: the inline edit input 
 
 ## 6. Testing Requirements
 - Component rendering tests.
-- Mock stream validation using `test/helpers/fake-trueforge.ts`.
+- Stream and approval contract validation with test-only SDK fakes in `test/helpers/trueforge-sdk-mock.ts`; these tests are not evidence of live model runs.
 
 ## 7. Module Completion Criteria
 1. Webview loads and renders token stream smoothly without freezing UI thread.

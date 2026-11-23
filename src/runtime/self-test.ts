@@ -3,7 +3,7 @@
  *
  * Runs a checklist of PASS/FAIL checks in an Output channel.
  * Checks: Node version, Python, Flask clone, TrueForge reachable,
- *         model answers hello, MCP ping.
+ *         configured model IDs, MCP ping. It does not create a TrueForge session.
  */
 
 import { execSync } from 'child_process';
@@ -73,14 +73,14 @@ function checkFlaskClone(): CheckResult {
         if (dirty) {
           return fail(
             `Flask clone at ${FLASK_PINNED_COMMIT} (dirty tree at ${p})`,
-            `Run: git -C "${p}" checkout -- . && git -C "${p}" clean -fd`
+            `Review and preserve the existing changes, then use a separate clean Flask 3.1.3 checkout for recording.`
           );
         }
         return pass(`Flask at ${FLASK_PINNED_COMMIT} (clean tree at ${p})`);
       } else {
         return fail(
           `Flask clone at ${FLASK_PINNED_COMMIT}  (found ${commit} at ${p})`,
-          `Run: git -C "${p}" checkout -- . && git -C "${p}" checkout ${FLASK_PINNED_COMMIT}`
+          `Create a separate clean pallets/flask checkout at ${FLASK_PINNED_COMMIT}; do not reset this checkout.`
         );
       }
     } catch {
@@ -93,11 +93,12 @@ function checkFlaskClone(): CheckResult {
   );
 }
 
-/** 4. Ports 8765 and 8790 check */
+/** 4. Ports configured check */
 function checkPorts(): CheckResult {
   const config = vscode.workspace.getConfiguration('forge');
   const mcpPort = config.get<number>('mcpPort', 8765);
-  return pass(`Ports configured (MCP: ${mcpPort}, TrueForge: 8790)`);
+  const trueforgeUrl = config.get<string>('trueforgeUrl', 'http://localhost:8790');
+  return pass(`Ports configured (MCP: ${mcpPort}, TrueForge: ${trueforgeUrl})`);
 }
 
 /** 5. TrueForge reachable */
@@ -110,38 +111,19 @@ async function checkTrueForge(): Promise<CheckResult> {
     : fail(`TrueForge reachable  (${url})`, 'Run: npm run start:all  or use Forge: Start All command');
 }
 
-/** 5. Model answers hello */
-async function checkModelHello(): Promise<CheckResult> {
+/** 5. Check model IDs from settings without creating a TrueForge session. */
+function checkConfiguredModels(): CheckResult {
   const config = vscode.workspace.getConfiguration('forge');
-  const url = config.get<string>('trueforgeUrl', 'http://localhost:8790');
-  const model = config.get<string>('model', 'ollama/llama-3-2-3b');
-
-  try {
-    const r = await fetch(`${url}/api/v1/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agent: {
-          spec: {
-            model: { name: model },
-            instructions: 'Reply with exactly: hello'
-          }
-        }
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!r.ok) {
-      const body = await r.text().catch(() => '');
-      return fail('Model answers hello', `TrueForge returned ${r.status} — check forge.model setting (current: ${model}). ${body.slice(0, 100)}`);
-    }
-    const { data: session } = (await r.json()) as { data?: { id?: string } };
-    if (!session?.id) {
-      return fail('Model answers hello', 'Session creation returned no ID');
-    }
-    return pass(`Model answers hello  (model: ${model}, session: ${session.id.slice(0, 8)})`);
-  } catch (e: any) {
-    return fail('Model answers hello', `Error: ${e.message} — check TrueForge and model`);
+  const primary = config.get<string>('model', '');
+  const fallback = config.get<string>('fallbackModel', '');
+  if (!primary.trim()) {
+    return fail('Model configuration', 'Set forge.model to a provider/model ID in VS Code settings.');
   }
+  if (fallback.trim() && fallback.trim() === primary.trim()) {
+    return fail('Model configuration', 'forge.fallbackModel must differ from forge.model.');
+  }
+  const fallbackText = fallback.trim() ? `, fallback: ${fallback.trim()}` : ', fallback: not configured';
+  return pass(`Model IDs configured (primary: ${primary.trim()}${fallbackText}; reachability is not tested)`);
 }
 
 /** 6. MCP ping */
@@ -177,7 +159,7 @@ export async function runSelfTest(): Promise<void> {
   report(checkFlaskClone());
   report(checkPorts());
   report(await checkTrueForge());
-  report(await checkModelHello());
+  report(checkConfiguredModels());
   report(await checkMcpPing());
 
   out.appendLine('');

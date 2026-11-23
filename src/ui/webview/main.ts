@@ -42,6 +42,7 @@ export class WebviewApp {
     window.addEventListener('message', (event) => {
       this.handleMessage(event.data as WebviewOutgoingMessage);
     });
+    this.vscode?.postMessage({ type: 'request_state' });
   }
 
   private renderLayout(): void {
@@ -50,7 +51,7 @@ export class WebviewApp {
       <header class="chat-header">
         <div class="header-status">
           <span class="status-dot"></span>
-          <span>TRUEFORGE HTTP://LOCALHOST:8790</span>
+          <span id="trueforgeEndpoint">TrueForge endpoint</span>
         </div>
         <div class="header-title-row">
           <h1 class="header-title">Forge Agent</h1>
@@ -58,10 +59,10 @@ export class WebviewApp {
         </div>
         <div class="header-models-row">
           <span>Models:</span>
-          <span class="model-name" id="primaryModelName">ollama/llama-3-2-3b</span>
+          <span class="model-name" id="primaryModelName">Loading configuration…</span>
           <span>→</span>
-          <span class="model-name" id="fallbackModelName">google-gemini/gemini-flash</span>
-          <span style="opacity: 0.6;">(fallback in order)</span>
+          <span class="model-name" id="fallbackModelName">Not configured</span>
+          <span style="opacity: 0.6;">(fallback)</span>
         </div>
         <div class="header-toolbar">
           <button class="btn-pill" id="undoBtn">Undo last change</button>
@@ -262,6 +263,16 @@ export class WebviewApp {
       case 'model_fallback':
         this.handleModelFallback(msg.from, msg.to, msg.reason);
         break;
+
+      case 'model_config': {
+        const primaryEl = this.root.querySelector('#primaryModelName');
+        const fallbackEl = this.root.querySelector('#fallbackModelName');
+        const endpointEl = this.root.querySelector('#trueforgeEndpoint');
+        if (primaryEl) primaryEl.textContent = msg.primary || 'No primary model configured';
+        if (fallbackEl) fallbackEl.textContent = msg.fallback || 'Not configured';
+        if (endpointEl) endpointEl.textContent = `TRUEFORGE ${msg.baseUrl}`;
+        break;
+      }
     }
   }
 

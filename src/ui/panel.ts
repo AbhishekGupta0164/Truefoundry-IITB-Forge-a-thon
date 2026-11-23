@@ -381,6 +381,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
         break;
 
       case 'request_state':
+        this.postMessage({ type: 'model_config', ...this.trueforgeClient.getConfiguredModels() });
         this.syncContextLedger();
         break;
 

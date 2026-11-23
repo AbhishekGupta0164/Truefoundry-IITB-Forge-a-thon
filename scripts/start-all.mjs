@@ -5,7 +5,7 @@
  * No bash dependencies — works on Windows, macOS, Linux.
  *
  * Usage:  npm run start:all
- *         node scripts/start-all.mjs [--port 8790] [--version 0.184.3]
+ *         node scripts/start-all.mjs [--trueforge-port 8790] [--version 0.184.3]
  */
 
 import { spawn } from 'child_process';
@@ -24,7 +24,6 @@ function argVal(flag) {
   return i !== -1 ? args[i + 1] : null;
 }
 
-const PORT = argVal('--port') ?? String(props['forge.mcpPort']?.default ?? 8765);
 const TF_PORT = argVal('--trueforge-port') ?? '8790';
 const VERSION = argVal('--version') ?? props['forge.trueforgeVersion']?.default ?? '0.184.3';
 const MODEL = argVal('--model') ?? props['forge.model']?.default ?? '';
@@ -105,6 +104,8 @@ const tfArgs = ['--yes', `@truefoundry/trueforge@${VERSION}`, '--port', TF_PORT]
 const tfProc = spawn(WIN ? 'npx.cmd' : 'npx', tfArgs, {
   env: {
     ...process.env,
+    // Preserve the previous launcher behavior; users may configure hosted or
+    // private model endpoints that are not in a local-only allowlist.
     NETWORK_POLICY_ENABLED: 'false',
     OUTBOUND_URL_ALLOWED_HOSTS: '["localhost","127.0.0.1"]',
   },

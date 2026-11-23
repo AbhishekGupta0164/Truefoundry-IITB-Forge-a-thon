@@ -52,7 +52,11 @@ describe('Agent chat side bar view', () => {
   });
 
   it('routes messages from the view to the provider and posts back to the view', async () => {
-    const client = new TrueForgeClient({ baseUrl: 'http://127.0.0.1:8790' });
+    const client = new TrueForgeClient({
+      baseUrl: 'http://127.0.0.1:8791',
+      model: 'google/gemini-live',
+      fallbackModel: 'openai/gpt-live'
+    });
     const panel = new AgentPanelProvider(undefined, client, undefined, new ContextLedger());
     panel.setExtensionUri((vscode as any).Uri.file('/ext'));
     const submit = vi.spyOn(panel, 'submitRawPrompt').mockResolvedValue();
@@ -61,6 +65,14 @@ describe('Agent chat side bar view', () => {
 
     await listeners[0]({ type: 'submit_prompt', prompt: 'Add a flask config command' });
     expect(submit).toHaveBeenCalledWith('Add a flask config command');
+
+    await listeners[0]({ type: 'request_state' });
+    expect(posted).toContainEqual({
+      type: 'model_config',
+      primary: 'google/gemini-live',
+      fallback: 'openai/gpt-live',
+      baseUrl: 'http://127.0.0.1:8791'
+    });
 
     panel.postMessage({ type: 'token', text: 'hello' });
     expect(posted).toContainEqual({ type: 'token', text: 'hello' });

@@ -12,9 +12,6 @@ import { defaultReviewManager } from './review/manager';
 import { defaultTrueForgeClient } from './trueforge/client';
 import { startTrueForge, stopTrueForge, getLastLogLines } from './runtime/launcher';
 import { runSelfTest } from './runtime/self-test';
-import * as os from 'os';
-import * as path from 'path';
-import * as fs from 'fs';
 
 let mcpServerManager: MCPServerManager | null = null;
 
@@ -38,26 +35,9 @@ export async function activate(context: vscode.ExtensionContext) {
       defaultStatusBar.setRuntimeReady(model);
     } else if (result === 'migration-error') {
       defaultStatusBar.setDown();
-      const choice = await vscode.window.showWarningMessage(
-        'TrueForge migration error — data directory incompatible.',
-        'Reset TrueForge data'
+      vscode.window.showErrorMessage(
+        'Forge: TrueForge reported a data migration error. Forge did not modify or reset TrueForge data. Check the daemon logs and use TrueForge’s supported recovery process.'
       );
-      if (choice === 'Reset TrueForge data') {
-        const dataDir =
-          cfg.get<string>('trueforgeDataDir', '') ||
-          path.join(os.homedir(), '.trueforge');
-        const bakDir = dataDir + '.bak';
-        try {
-          if (fs.existsSync(bakDir)) {
-            fs.rmSync(bakDir, { recursive: true, force: true });
-          }
-          fs.renameSync(dataDir, bakDir);
-          runtimeOut.appendLine(`[Forge] Renamed ${dataDir} → ${bakDir}`);
-          await doStartAll(); // retry after reset
-        } catch (e: any) {
-          vscode.window.showErrorMessage(`Forge: Failed to reset data dir: ${e.message}`);
-        }
-      }
     } else {
       // timeout
       defaultStatusBar.setDown();

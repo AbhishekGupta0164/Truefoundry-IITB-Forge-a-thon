@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CancelManager } from '../../src/review/cancel';
+import { CancelManager, formatCancellationReport } from '../../src/review/cancel';
 import { PatchStore } from '../../src/review/store';
 import { withRetry, classifyError, isRetryable } from '../../src/trueforge/retry';
 import { LoopGuard } from '../../src/trueforge/loop-guard';
@@ -69,7 +69,8 @@ describe('Step 3 (Stage 6): Cancel, Retry, Errors, Reconnect, and Loop Guard', (
       expect(stats.abandonedHunks).toBe(1);
       expect(stats.appliedHunks).toBe(0);
       expect(patchStore.getAllPatches().length).toBe(0);
-      expect(stats.message).toContain('No files modified');
+      expect(stats.message).toContain('No hunks from this run had been applied');
+      expect(formatCancellationReport(stats, 237)).toContain('\nNo files changed by this run.\n');
     });
 
     it('informs user if an approved hunk was already applied before cancel', async () => {
@@ -106,6 +107,7 @@ describe('Step 3 (Stage 6): Cancel, Retry, Errors, Reconnect, and Loop Guard', (
       expect(stats.appliedHunks).toBe(1);
       expect(stats.abandonedHunks).toBe(1);
       expect(stats.message).toContain('Note: 1 previously approved hunk(s) were already applied');
+      expect(formatCancellationReport(stats, 237)).not.toContain('No files changed by this run.');
     });
 
     it('refuses any later apply attempt on a cancelled patch', async () => {

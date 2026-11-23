@@ -1,8 +1,10 @@
 import { Hunk, Patch } from '../shared/types';
 
 export interface StagedHunk extends Hunk {
+  status?: 'pending' | 'accepted' | 'rejected' | 'stale' | 'applied' | 'failed';
   applied?: boolean;
   approved?: boolean;
+  appliedAt?: number;
   dependsOn?: string[];
   riskScore?: 'low' | 'medium' | 'high';
   badge?: string;
