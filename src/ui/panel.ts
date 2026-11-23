@@ -2,14 +2,16 @@ import type * as vscodeTypes from 'vscode';
 import { WebviewIncomingMessage, WebviewOutgoingMessage } from './messages';
 import { TrueForgeClient, defaultTrueForgeClient } from '../trueforge/client';
 import { PatchStore, defaultPatchStore } from '../review/store';
-import { defaultCancelManager } from '../review/cancel';
+import { defaultCancelManager, formatCancellationReport } from '../review/cancel';
 import { defaultUndoManager } from '../review/undo';
 import { ContextLedger, defaultContextLedger } from '../context/ledger';
 import { getUserFacingErrorMessage } from '../shared/errors';
-import { ContextEntry } from '../shared/types';
 import { ForgeEvent } from '../shared/events';
 import { buildMentionContext } from '../context/mentions';
 import { WorkspaceManager } from '../mcp/workspace';
+import { defaultDiffViewManager } from '../review/diff-view';
+import { defaultCodeLensProvider } from '../review/codelens';
+import { defaultStatusBar } from './status-bar';
 
 let vscodeModule: typeof vscodeTypes | undefined;
 try {
@@ -32,6 +34,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
   private view?: vscodeTypes.WebviewView;
   private messageHandlers: ((msg: WebviewIncomingMessage) => void)[] = [];
   private trueforgeClient: TrueForgeClient;
+  private displayedPatchIds = new Set<string>();
   public readonly contextLedger: ContextLedger;
   constructor(
     public extensionUri?: vscodeTypes.Uri,
@@ -43,6 +46,15 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
     this.trueforgeClient = trueforgeClient;
     this.contextLedger = contextLedger;
     this.workspaceManager = workspaceManager;
+
+    this.trueforgeClient.onModelFallback?.((info) => {
+      this.postMessage({
+        type: 'model_fallback',
+        from: info.from,
+        to: info.to,
+        reason: info.reason
+      });
+    });
 
     this.contextLedger.onContextUpdate((_entry, ledger) => {
       this.syncContextLedger(ledger);
@@ -168,9 +180,8 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
    */
   public async submitRawPrompt(prompt: string): Promise<void> {
     try {
-      this.postMessage({ type: 'budget_update', budget: { maxTokens: 12000, usedTokens: 0, maxCostUsd: 1, usedCostUsd: 0, maxIterations: 20, currentIteration: 1 } });
-
-      this.accumulatedContext = [];
+      defaultCancelManager.reset();
+      this.contextLedger.clear();
       this.postMessage({ type: 'run_started' });
 
       // Explicit @file / @symbol mentions become context; with none, the raw prompt goes as typed.
@@ -179,35 +190,11 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
       for (const miss of mentions.unresolved) {
         this.postMessage({ type: 'error', message: `${miss.mention}: ${miss.reason}` });
       }
-      if (mentions.entries.length > 0) {
-        this.accumulatedContext.push(...mentions.entries);
-        this.postMessage({ type: 'context_update', entries: [...this.accumulatedContext] });
-      }
+      if (mentions.entries.length === 0) this.syncContextLedger();
 
       const stream = await this.trueforgeClient.runTaskB(mentions.prompt, mentions.contextSummary || undefined);
       await this.consumeStream(stream);
-
-      // Ensure Task B context & visual review state is populated on screen
-      if (prompt.toLowerCase().includes('config') || prompt.toLowerCase().includes('cli command')) {
-        const taskBFiles = ['src/flask/cli.py', 'tests/test_cli.py', 'docs/cli.rst'];
-        for (const file of taskBFiles) {
-          if (!this.accumulatedContext.some(e => e.uri === file)) {
-            this.accumulatedContext.push({
-              id: `ctx-${Date.now()}-${file}`,
-              type: 'file',
-              uri: file,
-              content: '',
-              tokenCount: 420,
-              metadata: { tool: 'read_file', reason: 'Discovered built-in CLI references' }
-            });
-          }
-        }
-        this.postMessage({ type: 'context_update', entries: [...this.accumulatedContext] });
-        this.postMessage({
-          type: 'budget_update',
-          budget: { maxTokens: 12000, usedTokens: 3180, maxCostUsd: 1, usedCostUsd: 0.0024, maxIterations: 20, currentIteration: 3 }
-        });
-      }
+      await this.revealStagedPatches();
     } catch (err: any) {
       const msg = getUserFacingErrorMessage(err);
       this.postMessage({ type: 'error', message: msg });
@@ -215,7 +202,6 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
     }
   }
 
-  private accumulatedContext: ContextEntry[] = [];
   private workspaceManager?: WorkspaceManager;
 
   /**
@@ -229,6 +215,7 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
       switch (event.type) {
         case 'token':
           this.postMessage({ type: 'token', text: event.text });
+          defaultStatusBar.setWorking('TrueForge: Streaming response...');
           break;
 
         case 'tool_call': {
@@ -238,46 +225,15 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
             name: event.name,
             arguments: event.arguments
           });
+          defaultStatusBar.setWorking(`TrueForge: ${event.name}...`);
 
-          // Track discovered files and context for map visualization (Task B visible flow)
-          if (['read_file', 'search_text', 'find_related', 'search_symbols'].includes(event.name)) {
-            const args = (event.arguments || {}) as Record<string, unknown>;
-            const targetUri = String(args.path || args.filePath || args.targetPath || args.query || args.name || 'workspace');
-            const reason = String(args.reason || args.explanation || `Tool invocation: ${event.name}`);
-
-            let entryType: ContextEntry['type'] = 'file';
-            if (event.name === 'search_text') entryType = 'snippet';
-            else if (event.name === 'find_related' || event.name === 'search_symbols') entryType = 'symbol';
-
-            const existingIdx = this.accumulatedContext.findIndex(e => e.uri === targetUri);
-            if (existingIdx >= 0) {
-              this.accumulatedContext[existingIdx].metadata = {
-                ...this.accumulatedContext[existingIdx].metadata,
-                reason
-              };
-            } else {
-              this.accumulatedContext.push({
-                id: `ctx-${Date.now()}-${this.accumulatedContext.length}`,
-                type: entryType,
-                uri: targetUri,
-                content: '',
-                metadata: {
-                  tool: event.name,
-                  reason
-                }
-              });
-            }
-            this.postMessage({ type: 'context_update', entries: [...this.accumulatedContext] });
-          }
           break;
         }
 
         case 'tool_result': {
           this.postMessage({ type: 'tool_result', result: event.result });
-          if (event.result.output && this.accumulatedContext.length > 0) {
-            const last = this.accumulatedContext[this.accumulatedContext.length - 1];
-            last.tokenCount = Math.ceil(event.result.output.length / 4);
-            this.postMessage({ type: 'context_update', entries: [...this.accumulatedContext] });
+          if (event.result.success && ['propose_edit', 'propose_patch'].includes(event.result.name)) {
+            await this.revealStagedPatches();
           }
           break;
         }
@@ -311,6 +267,26 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
           break;
       }
     }
+  }
+
+  /** Open each real MCP proposal as soon as it is staged, before the model can request approval to apply it. */
+  private async revealStagedPatches(): Promise<void> {
+    const pending = this.patchStore.getAllPatches().filter((patch) => !this.displayedPatchIds.has(patch.id));
+    for (const patch of pending) {
+      this.displayedPatchIds.add(patch.id);
+      await defaultDiffViewManager.openDiffEditor(patch);
+    }
+    if (pending.length > 0) {
+      defaultCodeLensProvider.refresh();
+      defaultStatusBar.setPendingReviews(
+        pending.reduce((total, patch) => total + patch.hunks.filter((hunk) => !hunk.applied).length, 0)
+      );
+    }
+  }
+
+  /** Forget review tabs from a cancelled run so the next run starts with no stale proposals. */
+  public clearCancelledReviews(): void {
+    this.displayedPatchIds.clear();
   }
 
   /**
@@ -361,11 +337,22 @@ export class AgentPanelProvider implements vscodeTypes.WebviewViewProvider {
         break;
 
       case 'cancel_run': {
-        this.postMessage({ type: 'run_completed', status: 'cancelled' });
+        this.postMessage({ type: 'token', text: '\nStopped by you. Cancelling the TrueForge turn…\n' });
+        defaultStatusBar.setWorking('TrueForge: Cancelling...');
         if (vscodeModule?.commands?.executeCommand) {
-          await vscodeModule.commands.executeCommand('forge.cancel');
+          await vscodeModule.commands.executeCommand('forge.cancel', msg.requestedAt ?? Date.now());
         } else {
           const stats = defaultCancelManager.cancelAll();
+          await defaultCancelManager.waitForCancellation();
+          this.clearCancelledReviews();
+          await defaultDiffViewManager.closeReviewEditors();
+          const elapsedMs = Math.max(0, Date.now() - (msg.requestedAt ?? Date.now()));
+          this.postMessage({
+            type: 'token',
+            text: formatCancellationReport(stats, elapsedMs)
+          });
+          this.postMessage({ type: 'run_completed', status: 'cancelled' });
+          defaultStatusBar.setReady();
           vscodeModule?.window?.showInformationMessage(stats.message);
         }
         break;

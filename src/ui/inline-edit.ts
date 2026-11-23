@@ -6,6 +6,7 @@ import { executeApplyPatchHunk } from '../mcp/tools/apply_patch_hunk';
 import { defaultDiffViewManager } from '../review/diff-view';
 import { defaultCodeLensProvider } from '../review/codelens';
 import { defaultUndoManager } from '../review/undo';
+import { defaultCancelManager } from '../review/cancel';
 import { defaultStatusBar } from './status-bar';
 import { runPostAcceptCheck } from '../verify/post-accept';
 import { TrueForgeClient, defaultTrueForgeClient } from '../trueforge/client';
@@ -34,6 +35,10 @@ export class InlineEditController {
     this.workspaceManager = options.workspaceManager ?? new WorkspaceManager();
     this.patchStore = options.patchStore ?? defaultPatchStore;
     this.trueforgeClient = options.trueforgeClient ?? defaultTrueForgeClient;
+
+    this.trueforgeClient.onModelFallback?.((info) => {
+      defaultStatusBar.setWorking(`Switched to fallback (${info.to})...`);
+    });
   }
 
   /**
@@ -61,6 +66,7 @@ export class InlineEditController {
 
     const selectedText = document.getText(selection);
     const filePath = document.uri.fsPath;
+    const relativeFilePath = path.relative(this.workspaceManager.getRoot(), filePath).replace(/\\/g, '/');
 
     // Prompt user for instruction
     const instruction = await vscodeModule.window.showInputBox({
@@ -75,6 +81,20 @@ export class InlineEditController {
     }
 
     defaultStatusBar.setWorking('TrueForge: Agent reasoning...');
+    defaultCancelManager.reset();
+
+    // Mark the inline run in the panel. Tool and context events below come from the live stream.
+    try {
+      const { defaultAgentPanel } = await import('./panel.js');
+      defaultAgentPanel.contextLedger.clear();
+      defaultAgentPanel.syncContextLedger();
+      defaultAgentPanel.postMessage({
+        type: 'run_started',
+        prompt: instruction
+      });
+    } catch {
+      // panel not open
+    }
 
     try {
       // Record initial file state for undo tracking
@@ -92,60 +112,26 @@ export class InlineEditController {
 
       // Dispatch to TrueForge session
       const stream = await this.trueforgeClient.runTaskA({
-        filePath,
+        filePath: relativeFilePath,
         selectionRange,
         selectedText,
         instruction,
         fullContent: document.getText()
       });
-
-      for await (const event of stream) {
-        if (event.type === 'token') {
-          defaultStatusBar.setWorking('TrueForge: Generating edit...');
-        } else if (event.type === 'tool_call') {
-          defaultStatusBar.setWorking(`TrueForge: ${event.name}...`);
-        } else if (event.type === 'error') {
-          vscodeModule.window.showErrorMessage(getUserFacingErrorMessage(event.message));
-          defaultStatusBar.setReady();
-          return;
-        }
-      }
+      const { defaultAgentPanel } = await import('./panel.js');
+      await defaultAgentPanel.consumeStream(stream);
 
       // Check PatchStore for the patch received via propose_edit over MCP
       const patchesAfter = this.patchStore.getAllPatches();
-      let newPatch =
-        patchesAfter.find(p => !patchesBefore.has(p.id)) ||
-        patchesAfter[patchesAfter.length - 1];
-
-      // Fallback: If model did not issue MCP tool call (e.g. smaller local model answered in text),
-      // stage the edit so the diff and Accept / Reject CodeLens ALWAYS appear in the editor!
-      if (!newPatch || newPatch.hunks.length === 0) {
-        if (filePath.endsWith('helpers.py') || instruction.toLowerCase().includes('off')) {
-          const { executeProposeEdit } = await import('../mcp/tools/propose_edit.js');
-          const relPath = path.relative(this.workspaceManager.getRoot(), filePath);
-          const currentText = document.getText();
-          const targetOld = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no"})';
-          const targetNew = 'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n\n    Values treated as false are: ``"0"``, ``"false"``, ``"no"``, ``"off"``,\n    and ``"n"`` (case-insensitive).\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})';
-
-          if (currentText.includes('{"0", "false", "no"}')) {
-            await executeProposeEdit(
-              {
-                path: relPath,
-                old_str: targetOld,
-                new_str: targetNew,
-                reason: 'Treat values off and n as false case-insensitively'
-              },
-              this.workspaceManager,
-              this.patchStore
-            );
-            const updatedPatches = this.patchStore.getAllPatches();
-            newPatch = updatedPatches[updatedPatches.length - 1];
-          }
-        }
-      }
+      const newPatch = patchesAfter.find(p => !patchesBefore.has(p.id));
 
       if (newPatch && newPatch.hunks.length > 0) {
-        defaultDiffViewManager.renderHunkDecorations(editor, newPatch.hunks);
+        let activeEditor = editor;
+        if (vscodeModule.window.activeTextEditor && vscodeModule.window.activeTextEditor.document.uri.fsPath === filePath) {
+          activeEditor = vscodeModule.window.activeTextEditor;
+        }
+
+        defaultDiffViewManager.renderHunkDecorations(activeEditor, newPatch.hunks);
         defaultCodeLensProvider.refresh();
         defaultStatusBar.setPendingReviews(newPatch.hunks.length);
 
@@ -157,7 +143,15 @@ export class InlineEditController {
         defaultStatusBar.setReady();
       }
     } catch (err: any) {
-      vscodeModule.window.showErrorMessage(getUserFacingErrorMessage(err));
+      const message = getUserFacingErrorMessage(err);
+      vscodeModule.window.showErrorMessage(message);
+      try {
+        const { defaultAgentPanel } = await import('./panel.js');
+        defaultAgentPanel.postMessage({ type: 'error', message });
+        defaultAgentPanel.postMessage({ type: 'run_completed', status: 'failed' });
+      } catch {
+        // The panel may not be available in a non-standard extension host.
+      }
       defaultStatusBar.setReady();
     }
   }

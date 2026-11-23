@@ -58,9 +58,9 @@ export class WebviewApp {
         </div>
         <div class="header-models-row">
           <span>Models:</span>
-          <span class="model-name">ollama/llama-3-2-3b</span>
+          <span class="model-name" id="primaryModelName">ollama/llama-3-2-3b</span>
           <span>→</span>
-          <span class="model-name">google-gemini/gemini-flash</span>
+          <span class="model-name" id="fallbackModelName">google-gemini/gemini-flash</span>
           <span style="opacity: 0.6;">(fallback in order)</span>
         </div>
         <div class="header-toolbar">
@@ -108,8 +108,7 @@ export class WebviewApp {
   private bindEvents(): void {
     this.sendBtn.addEventListener('click', () => this.submitPrompt());
     this.stopBtn.addEventListener('click', () => {
-      this.vscode?.postMessage({ type: 'cancel_run' });
-      this.setRunning(false);
+      this.vscode?.postMessage({ type: 'cancel_run', requestedAt: Date.now() });
     });
     this.undoBtn.addEventListener('click', () => {
       this.vscode?.postMessage({ type: 'undo_task' });
@@ -242,6 +241,10 @@ export class WebviewApp {
         break;
 
       case 'run_started':
+        if (msg.prompt) {
+          this.appendUserMessage(msg.prompt);
+          this.initAgentResponse();
+        }
         this.setRunning(true);
         break;
 
@@ -255,7 +258,30 @@ export class WebviewApp {
         this.setRunning(false);
         this.updateStatus('failed');
         break;
+
+      case 'model_fallback':
+        this.handleModelFallback(msg.from, msg.to, msg.reason);
+        break;
     }
+  }
+
+  private handleModelFallback(from: string, to: string, reason?: string): void {
+    const primaryEl = this.root.querySelector('#primaryModelName');
+    const fallbackEl = this.root.querySelector('#fallbackModelName');
+    if (primaryEl) primaryEl.textContent = from;
+    if (fallbackEl) {
+      fallbackEl.textContent = `(${to})`;
+      fallbackEl.classList.add('active-fallback');
+    }
+
+    const card = document.createElement('div');
+    card.className = 'fallback-banner-card';
+    card.innerHTML = `
+      <div class="fallback-banner-title">${escapeHtml(reason || 'Cannot connect to API: bad port.')}</div>
+      <div class="fallback-banner-text">Switching to fallback model ${escapeHtml(to)}.</div>
+    `;
+    this.messagesContainer.appendChild(card);
+    this.scrollToBottom();
   }
 
   private addToolStep(id: string, name: string, args: Record<string, unknown>): void {

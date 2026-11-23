@@ -186,10 +186,11 @@ describe('Step 1: Routing Task A and Task B through TrueForge', () => {
       instruction: "Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false."
     });
 
-    const expectedPrompt =
-      "Edit only lines 28-35 of src/flask/helpers.py. Instruction: Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.. Call propose_edit once with a reason. Do not answer with code in chat.";
-
-    expect(sentPrompt).toBe(expectedPrompt);
+    expect(sentPrompt).toContain('Edit only lines 28-35 of src/flask/helpers.py. Selected source text:');
+    expect(sentPrompt).toContain('def get_debug_flag(): ...');
+    expect(sentPrompt).toContain(
+      "Instruction: Treat the values 'off' and 'n' as false as well, case-insensitively, and update the docstring to list every value that is treated as false.. Call propose_edit once with a reason. Do not answer with code in chat."
+    );
   });
 
   it('Step 4 Invariant: executeProposeEdit logs [forge] patch staged by propose_edit session=<id>', async () => {

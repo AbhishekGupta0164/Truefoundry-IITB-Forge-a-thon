@@ -1,10 +1,17 @@
 import * as fs from 'fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { executeProposeEdit } from '../../src/mcp/tools/propose_edit';
 import { WorkspaceManager } from '../../src/mcp/workspace';
 import { PatchStore } from '../../src/review/store';
+import { defaultCancelManager } from '../../src/review/cancel';
+import { defaultSessionStateManager } from '../../src/trueforge/session-state';
 
 describe('propose_edit Tool (Item 22)', () => {
+  afterEach(() => {
+    defaultCancelManager.reset();
+    defaultSessionStateManager.reset();
+  });
+
   it('stages an edit in memory and never modifies files on disk', async () => {
     const wsManager = new WorkspaceManager();
     const patchStore = new PatchStore();
@@ -74,5 +81,23 @@ describe('propose_edit Tool (Item 22)', () => {
         patchStore
       )
     ).rejects.toThrow(/ambiguous/);
+  });
+
+  it('refuses to stage a proposal after its run was cancelled', async () => {
+    defaultCancelManager.reset();
+    defaultSessionStateManager.markCancelled();
+    const patchStore = new PatchStore();
+
+    await expect(executeProposeEdit(
+      {
+        path: 'package.json',
+        old_str: '"name": "forge-agent"',
+        new_str: '"name": "late-cancelled-edit"'
+      },
+      new WorkspaceManager(),
+      patchStore
+    )).rejects.toThrow(/cancelled/i);
+
+    expect(patchStore.getAllPatches()).toHaveLength(0);
   });
 });

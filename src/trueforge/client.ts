@@ -8,6 +8,16 @@
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type TrueForgeInstance = any;
+import type * as vscodeTypes from 'vscode';
+
+let vscodeModule: typeof vscodeTypes | undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  vscodeModule = require('vscode');
+} catch {
+  // Running outside VS Code
+}
+
 import { ForgeEvent } from '../shared/events';
 import { TOTAL_RUN_SAFETY_CAP } from '../shared/constants';
 import { getTrueForgeConfig, TrueForgeConfig } from './config';
@@ -162,8 +172,8 @@ export class TrueForgeClient {
       'When adding a feature, find the closest existing example, then change the implementation, a test and the docs, mirroring how the existing example is registered, tested and documented. Always pass a reason. Be brief.',
       'Search before reading. Read the implementation, tests and docs before proposing an edit.',
       'Never invent a path.',
-      'Never write except by calling apply_patch_hunk once per hunk.',
-      'Do not use the terminal to edit files.',
+      'IMPORTANT: To write any file change, you MUST call the propose_edit tool with path, old_str, new_str, and reason. Never output code in chat.',
+      'Call propose_edit once per hunk. Do not use the terminal to edit files.',
       'Never read .env or secret files. Respect the retrieved-context budget.'
     ].join('\n');
 
@@ -216,7 +226,16 @@ export class TrueForgeClient {
     try {
       return await withRetry(
         () => tryCreate(targetModel),
-        { targetUrl: this.config.baseUrl }
+        {
+          targetUrl: this.config.baseUrl,
+          policy: { maxRetries: 2, initialDelayMs: 800, backoffFactor: 2 },
+          onRetry: (attempt, delayMs) => {
+            const delaySec = (delayMs / 1000).toFixed(1);
+            const msg = `[Forge] First model unreachable: Retry ${attempt} of 2, after ${delaySec} s...`;
+            console.warn(msg);
+            vscodeModule?.window?.showWarningMessage?.(msg);
+          }
+        }
       );
     } catch (err) {
       if (this.canFallBackFrom(targetModel)) {
@@ -244,11 +263,11 @@ export class TrueForgeClient {
     const filePath = params.filePath;
     const instruction = params.instruction;
 
-    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Instruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
+    const prompt = `Edit only lines ${start}-${end} of ${filePath}. Selected source text:\n${params.selectedText}\nInstruction: ${instruction}. Call propose_edit once with a reason. Do not answer with code in chat.`;
 
     return this.runWithFallback(prompt, undefined, {
       preload: true,
-      enableTools: ['read_file', 'propose_edit'],
+      enableTools: ['read_file', 'propose_edit', 'apply_patch_hunk'],
       instructionsOverride: 'You are Forge Agent. Your only role is to propose code edits by calling propose_edit with path, old_str, new_str, and reason. Always use the propose_edit tool.'
     });
   }
@@ -262,7 +281,18 @@ export class TrueForgeClient {
     contextSummary?: string,
     options?: { preload?: boolean; compaction?: boolean }
   ): Promise<AsyncGenerator<ForgeEvent, void, unknown>> {
-    return this.runWithFallback(rawRequest, contextSummary, options);
+    const taskBInstructions = [
+      'You are Forge Agent. Your only role is to propose code edits by calling propose_edit with path, old_str, new_str, and reason.',
+      'Discover relevant implementation, tests, and documentation files from the workspace. Do not assume filenames; search first, then read only the ranges needed.',
+      'After proposing changes, call apply_patch_hunk for each proposed hunk using the returned patch and hunk IDs. This tool requires the user to approve each hunk; wait for that approval before continuing.',
+      'Always use propose_edit for changes. Do not answer with code in chat and never use terminal commands to write files.'
+    ].join('\n');
+    return this.runWithFallback(rawRequest, contextSummary, {
+      ...options,
+      preload: false,
+      instructionsOverride: taskBInstructions,
+      enableTools: ['search_text', 'search_symbols', 'find_related', 'read_file', 'propose_edit', 'apply_patch_hunk']
+    });
   }
 
   /** Subscribe to automatic primary -> fallback model switches. Returns an unsubscribe function. */
@@ -278,6 +308,10 @@ export class TrueForgeClient {
 
   private notifyFallback(info: ModelFallbackInfo): void {
     console.warn(`[forge] model fallback ${info.from} -> ${info.to}: ${info.reason}`);
+    const reasonText = info.reason || 'Cannot connect to API: bad port.';
+    vscodeModule?.window?.showWarningMessage?.(
+      `[Forge] ${reasonText} Switching to fallback model ${info.to}.`
+    );
     for (const listener of this.fallbackListeners) {
       listener(info);
     }
@@ -408,7 +442,16 @@ export class TrueForgeClient {
 
         return this._adaptStream(stream);
       },
-      { targetUrl: this.config.baseUrl }
+      {
+        targetUrl: this.config.baseUrl,
+        policy: { maxRetries: 2, initialDelayMs: 800, backoffFactor: 2 },
+        onRetry: (attempt, delayMs) => {
+          const delaySec = (delayMs / 1000).toFixed(1);
+          const msg = `[Forge] First model unreachable: Retry ${attempt} of 2, after ${delaySec} s...`;
+          console.warn(msg);
+          vscodeModule?.window?.showWarningMessage?.(msg);
+        }
+      }
     );
   }
 

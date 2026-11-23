@@ -3,7 +3,7 @@ import { MCPAuthenticator } from './mcp/auth';
 import { MCPServerManager } from './mcp/server';
 import { defaultInlineEditController } from './ui/inline-edit';
 import { AgentPanelProvider, defaultAgentPanel } from './ui/panel';
-import { defaultCancelManager } from './review/cancel';
+import { defaultCancelManager, formatCancellationReport } from './review/cancel';
 import { defaultUndoManager } from './review/undo';
 import { defaultCodeLensProvider } from './review/codelens';
 import { defaultStatusBar } from './ui/status-bar';
@@ -93,59 +93,6 @@ export async function activate(context: vscode.ExtensionContext) {
     await defaultInlineEditController.trigger();
   });
 
-  // Demo Task A: stage the get_debug_flag edit directly (bypasses model for demo recording)
-  const demoTaskACmd = vscode.commands.registerCommand('forge.demoTaskA', async () => {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-      vscode.window.showErrorMessage('Forge: No workspace folder open');
-      return;
-    }
-    const wsRoot = workspaceFolders[0].uri.fsPath;
-    const relPath = 'src/flask/helpers.py';
-    const absPath = require('path').join(wsRoot, relPath);
-    if (!require('fs').existsSync(absPath)) {
-      vscode.window.showErrorMessage(`Forge: Cannot find ${relPath} — open the Flask folder`);
-      return;
-    }
-
-    const { executeProposeEdit } = await import('./mcp/tools/propose_edit.js');
-    const { WorkspaceManager } = await import('./mcp/workspace.js');
-    const { defaultPatchStore } = await import('./review/store.js');
-    const wm = new WorkspaceManager(wsRoot);
-
-    defaultStatusBar.setWorking('TrueForge: Staging Task A edit...');
-    try {
-      await executeProposeEdit(
-        {
-          path: relPath,
-          old_str:
-'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no"})',
-          new_str:
-'def get_debug_flag() -> bool:\n    """Get whether debug mode should be enabled for the app, indicated by the\n    :envvar:`FLASK_DEBUG` environment variable. The default is ``False``.\n\n    Values treated as false are: ``"0"``, ``"false"``, ``"no"``, ``"off"``,\n    and ``"n"`` (case-insensitive).\n    """\n    val = os.environ.get("FLASK_DEBUG")\n    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})',
-          reason: 'Treat off and n as false per task instruction'
-        },
-        wm,
-        defaultPatchStore
-      );
-
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absPath));
-      const editor = await vscode.window.showTextDocument(doc);
-      const patches = defaultPatchStore.getAllPatches();
-      const patch = patches[patches.length - 1];
-      if (patch && patch.hunks.length > 0) {
-        defaultDiffViewManager.renderHunkDecorations(editor, patch.hunks);
-        defaultCodeLensProvider.refresh();
-        defaultStatusBar.setPendingReviews(patch.hunks.length);
-        vscode.window.showInformationMessage(
-          `Forge: Task A — ${patch.hunks.length} hunk(s) proposed. Click Accept above the green block.`
-        );
-      }
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`Forge Demo Task A: ${err.message}`);
-      defaultStatusBar.setReady();
-    }
-  });
-
   // Hunk review commands (CodeLens and UI actions)
   const acceptHunkCmd = vscode.commands.registerCommand(
     'forge.acceptHunk',
@@ -212,17 +159,25 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   // Cancel active run (T6: one-gesture undo, AbortController, panel update)
-  const cancelCmd = vscode.commands.registerCommand('forge.cancel', async () => {
+  const cancelCmd = vscode.commands.registerCommand('forge.cancel', async (requestedAt?: number) => {
     // 1. Immediately abort running tasks, call sessions.cancel, discard unapplied patches
     const stats = defaultCancelManager.cancelAll();
+    await defaultCancelManager.waitForCancellation();
+    defaultAgentPanel.clearCancelledReviews();
 
-    // 2. Show 'Cancelled' in panel within one second
+    const elapsedMs = Math.max(0, Date.now() - (requestedAt ?? Date.now()));
+    defaultAgentPanel.postMessage({
+      type: 'token',
+      text: formatCancellationReport(stats, elapsedMs)
+    });
     defaultAgentPanel.postMessage({ type: 'run_completed', status: 'cancelled' });
+    vscode.window.showInformationMessage(stats.message);
 
     // 3. Clear diff view decorations & update status bar
     if (vscode.window.activeTextEditor) {
       defaultDiffViewManager.clearDecorations(vscode.window.activeTextEditor);
     }
+    await defaultDiffViewManager.closeReviewEditors();
     defaultCodeLensProvider.refresh();
     defaultReviewManager.clear();
     defaultReviewManager.updateStatusBar();
@@ -237,8 +192,6 @@ export async function activate(context: vscode.ExtensionContext) {
       if (choice === 'Undo') {
         await vscode.commands.executeCommand('forge.undoTask');
       }
-    } else {
-      vscode.window.showInformationMessage(stats.message);
     }
   });
 
@@ -314,7 +267,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     inlineEditCmd,
-    demoTaskACmd,
     acceptHunkCmd,
     rejectHunkCmd,
     openPanelCmd,

@@ -10,9 +10,17 @@ export interface CancelResult {
   message: string;
 }
 
+export function formatCancellationReport(result: CancelResult, elapsedMs: number): string {
+  const fileOutcome = result.appliedHunks === 0
+    ? 'No files changed by this run.'
+    : `${result.appliedHunks} approved hunk(s) were already applied before cancellation.`;
+  return `Stopped ${elapsedMs} ms after you pressed Stop. ${result.message}\n${fileOutcome}\n`;
+}
+
 export class CancelManager {
   private cancelledPatchIds = new Set<string>();
   private cancelCallbacks: (() => Promise<void> | void)[] = [];
+  private cancellationHooks: Promise<void>[] = [];
   private abortController: AbortController = new AbortController();
   private isCancelledFlag = false;
 
@@ -67,11 +75,12 @@ export class CancelManager {
     defaultSessionStateManager.markCancelled();
 
     // Trigger registered cancellation hooks (e.g. TrueForge SDK sessions.cancel)
+    this.cancellationHooks = [];
     for (const cb of this.cancelCallbacks) {
       try {
         const res = cb();
-        if (res && typeof (res as any).catch === 'function') {
-          (res as any).catch(() => {});
+        if (res && typeof (res as any).then === 'function') {
+          this.cancellationHooks.push(Promise.resolve(res).catch(() => {}));
         }
       } catch {
         // Safe fire-and-forget
@@ -104,7 +113,7 @@ export class CancelManager {
     if (appliedHunks > 0) {
       message = `Run cancelled: ${cancelledPatches} patch(es) discarded (${abandonedHunks} unapproved hunks). Note: ${appliedHunks} previously approved hunk(s) were already applied.`;
     } else {
-      message = `Run cancelled: ${cancelledPatches} patch(es) discarded (${abandonedHunks} unapproved hunks). No files modified.`;
+      message = `Run cancelled: ${cancelledPatches} patch(es) discarded (${abandonedHunks} unapproved hunks). No hunks from this run had been applied.`;
     }
 
     return {
@@ -115,9 +124,16 @@ export class CancelManager {
     };
   }
 
+  /** Wait for registered SDK/session cancellation requests to settle. */
+  public async waitForCancellation(): Promise<void> {
+    await Promise.all(this.cancellationHooks);
+    this.cancellationHooks = [];
+  }
+
   public reset(): void {
     this.isCancelledFlag = false;
     this.cancelledPatchIds.clear();
+    this.cancellationHooks = [];
     this.abortController = new AbortController();
   }
 }
