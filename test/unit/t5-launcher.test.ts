@@ -3,6 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Mock vscode ───────────────────────────────────────────────────────────────
 vi.mock('vscode', () => {
@@ -87,6 +89,14 @@ describe('T5: startTrueForge()', () => {
     const out = { append: vi.fn(), appendLine: vi.fn() } as any;
     const result = await launcher.startTrueForge(out, 'http://localhost:8790', '0.184.3');
     expect(result).toBe('ready');
+  });
+});
+
+describe('T5: one-click launcher network config', () => {
+  it('preserves the existing policy setting for configured provider endpoints', () => {
+    const launcher = fs.readFileSync(path.resolve(__dirname, '../../scripts/start-all.mjs'), 'utf8');
+    expect(launcher).toContain("NETWORK_POLICY_ENABLED: 'false'");
+    expect(launcher).toContain("OUTBOUND_URL_ALLOWED_HOSTS: '[\"localhost\",\"127.0.0.1\"]'");
   });
 });
 

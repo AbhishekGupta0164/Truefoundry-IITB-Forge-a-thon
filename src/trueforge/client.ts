@@ -306,6 +306,14 @@ export class TrueForgeClient {
     return this.activeModel;
   }
 
+  public getConfiguredModels(): { primary: string; fallback: string; baseUrl: string } {
+    return {
+      primary: this.config.model,
+      fallback: this.config.fallbackModel,
+      baseUrl: this.config.baseUrl
+    };
+  }
+
   private notifyFallback(info: ModelFallbackInfo): void {
     console.warn(`[forge] model fallback ${info.from} -> ${info.to}: ${info.reason}`);
     const reasonText = info.reason || 'Cannot connect to API: bad port.';

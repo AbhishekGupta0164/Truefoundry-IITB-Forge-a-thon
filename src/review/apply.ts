@@ -3,7 +3,6 @@
  * Safely applies unified diff hunks to source files.
  */
 
-import * as fs from 'fs';
 import { Hunk } from '../shared/types';
 import { StaleHunkError } from '../shared/errors';
 
@@ -84,10 +83,4 @@ export function applyHunkToContent(originalContent: string, hunk: Hunk): string 
 
   originalLines.splice(startIndex, count, ...replacementLines);
   return originalLines.join('\n');
-}
-
-export function applyHunkToFile(filePath: string, hunk: Hunk): void {
-  const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : '';
-  const updated = applyHunkToContent(content, hunk);
-  fs.writeFileSync(filePath, updated, 'utf-8');
 }

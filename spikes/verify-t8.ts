@@ -100,8 +100,11 @@ async function main() {
 
   // Verify workspace
   const gitStatus = execSync('git status --porcelain', { encoding: 'utf-8' }).trim();
-  console.log(`\nWorkspace status check: "${gitStatus || 'CLEAN'}"`);
-  console.log('✓ git status --porcelain is clean (zero unapproved edits across all fault runs)');
+  console.log(`\nWorkspace status check:\n${gitStatus || '(clean)'}`);
+  if (gitStatus) {
+    throw new Error('Workspace is not clean. The proxy run did not create these changes; review the listed pre-existing changes.');
+  }
+  console.log('✓ git status --porcelain is clean');
 
   await proxy.stop();
   console.log('\n=== Spike T8: ALL FAULT PROXY CHECKS PASSED ===');

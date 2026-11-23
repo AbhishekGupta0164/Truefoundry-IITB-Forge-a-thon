@@ -8,21 +8,14 @@
 
 import * as fs from 'fs';
 import { locateHunk } from './apply';
-import { PatchStore, defaultPatchStore } from './store';
-import type * as vscodeTypes from 'vscode';
+import { PatchStore, defaultPatchStore, StagedPatch } from './store';
 import { ReviewPatch, ReviewHunk } from '../shared/types';
 import { StaleHunkError } from '../shared/errors';
 import { WorkspaceManager } from '../mcp/workspace';
 import { defaultUndoManager, UndoManager } from './undo';
 import { defaultStatusBar, ForgeStatusBar } from '../ui/status-bar';
-
-let vscodeModule: typeof vscodeTypes | undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  vscodeModule = require('vscode');
-} catch {
-  // Running outside VS Code
-}
+import { executeApplyPatchHunk } from '../mcp/tools/apply_patch_hunk';
+import { defaultCancelManager } from './cancel';
 
 export class ReviewManager {
   private patches = new Map<string, ReviewPatch>();
@@ -32,7 +25,7 @@ export class ReviewManager {
     private readonly workspaceManager: WorkspaceManager = new WorkspaceManager(),
     private readonly undoManager: UndoManager = defaultUndoManager,
     private readonly statusBar: ForgeStatusBar = defaultStatusBar,
-    private readonly patchStore: PatchStore = defaultPatchStore
+    private readonly patchStore: PatchStore = new PatchStore()
   ) {}
 
   /**
@@ -69,6 +62,7 @@ export class ReviewManager {
       }
     }
     this.patches.set(patch.id, patch);
+    this.patchStore.stagePatch(patch as StagedPatch);
     this.updateStatusBar();
   }
 
@@ -169,8 +163,6 @@ export class ReviewManager {
       return { success: true, message: `Hunk ${hunkId} already applied` };
     }
 
-    const absPath = this.workspaceManager.resolveSafePath(hunk.file);
-
     // Stale check
     const staleResult = this.checkStale(patchId, hunkId);
     if (staleResult.stale) {
@@ -180,77 +172,16 @@ export class ReviewManager {
       throw new StaleHunkError(hunkId, staleResult.reason || 'Hunk is stale');
     }
 
-    const currentContent = fs.readFileSync(absPath, 'utf-8');
-    const fileLines = currentContent.split(/\r?\n/);
-    const hunkDiffLines = hunk.content.split('\n');
-
-    const expectedOldLines: string[] = [];
-    const replacementLines: string[] = [];
-
-    for (const line of hunkDiffLines) {
-      if (line.startsWith('-')) {
-        expectedOldLines.push(line.slice(1));
-      } else if (line.startsWith('+')) {
-        replacementLines.push(line.slice(1));
-      } else if (line.startsWith(' ')) {
-        expectedOldLines.push(line.slice(1));
-        replacementLines.push(line.slice(1));
-      }
-    }
-
-    // Earlier hunks of the same patch may have moved this one (checkStale already confirmed it is there).
-    const located = locateHunk(fileLines, expectedOldLines, Math.max(0, hunk.oldStart - 1));
-    const startIdx = located === -1 ? Math.max(0, hunk.oldStart - 1) : located;
-    const count = hunk.oldLines > 0 ? hunk.oldLines : expectedOldLines.length;
-
-    const updatedLines = [
-      ...fileLines.slice(0, startIdx),
-      ...replacementLines,
-      ...fileLines.slice(startIdx + count)
-    ];
-    const eol = currentContent.includes('\r\n') ? '\r\n' : '\n';
-    const newContent = updatedLines.join(eol);
-
-    // 1. Apply via VS Code WorkspaceEdit if inside extension host
-    try {
-      if (vscodeModule?.workspace && typeof vscodeModule.workspace.applyEdit === 'function') {
-        const fileUri = vscodeModule.Uri.file(absPath);
-        const edit = new vscodeModule.WorkspaceEdit();
-        const doc = await vscodeModule.workspace.openTextDocument(fileUri);
-        const fullRange = new vscodeModule.Range(
-          new vscodeModule.Position(0, 0),
-          new vscodeModule.Position(doc.lineCount || fileLines.length, 0)
-        );
-        edit.replace(fileUri, fullRange, newContent);
-        await vscodeModule.workspace.applyEdit(edit);
-        if (doc && typeof (doc as any).save === 'function') {
-          await (doc as any).save();
-        }
-      }
-    } catch {
-      // Ignore if editor not open
-    }
-
-    // 2. Persistent write
-    fs.writeFileSync(absPath, newContent, 'utf-8');
-
-    // 3. Record inverse edit for whole task undo
     const effectiveTaskId = taskId || hunk.taskId || patch.taskId || this.activeTaskId;
-    this.undoManager.recordInverseEdit({
-      taskId: effectiveTaskId,
-      patchId,
-      hunkId,
-      file: absPath,
-      oldStart: startIdx + 1,
-      oldLines: count,
-      newStart: startIdx + 1,
-      newLines: replacementLines.length,
-      originalLines: expectedOldLines,
-      replacementLines,
-      timestamp: Date.now()
-    });
+    const applied = await executeApplyPatchHunk(
+      { patch_id: patchId, hunk_id: hunkId, task_id: effectiveTaskId },
+      this.workspaceManager,
+      this.patchStore,
+      this.undoManager,
+      defaultCancelManager
+    );
 
-    // 4. Update status
+    // Keep the review view in sync with the shared patch-store apply result.
     hunk.status = 'applied';
     hunk.applied = true;
     hunk.approved = true;
@@ -259,7 +190,7 @@ export class ReviewManager {
 
     return {
       success: true,
-      message: `Successfully accepted and applied hunk ${hunkId} to ${patch.targetFile}`
+      message: applied.message
     };
   }
 
@@ -317,4 +248,9 @@ export class ReviewManager {
   }
 }
 
-export const defaultReviewManager = new ReviewManager();
+export const defaultReviewManager = new ReviewManager(
+  new WorkspaceManager(),
+  defaultUndoManager,
+  defaultStatusBar,
+  defaultPatchStore
+);

@@ -126,16 +126,15 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run test/unit test/mcp",
     "test:e2e": "vitest run test/e2e",
-    "eval": "tsx eval/run.ts",
     "start:all": "node scripts/start-all.mjs",
-    "package": "vsce package --no-dependencies",
-    "vsce-package": "vsce package --no-dependencies"
+    "package": "npx --yes @vscode/vsce@4.1.1 package --no-dependencies",
+    "vsce-package": "npm run package"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.5.0",
-    "@truefoundry/trueforge-sdk": "^0.184.1",
+    "@truefoundry/trueforge-sdk": "0.184.1",
     "diff": "^5.2.0",
     "zod": "^3.23.8"
   },

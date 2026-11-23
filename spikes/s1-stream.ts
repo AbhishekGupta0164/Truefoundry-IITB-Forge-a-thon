@@ -1,11 +1,12 @@
 import { TrueForge } from "@truefoundry/trueforge-sdk";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const BASE_URL = process.env.TRUEFORGE_BASE_URL ?? "http://localhost:8790";
 
 // Use the provider/model identifier configured in TrueForge Settings.
-// For your Ollama setup, this is expected to be ollama/llama3.2:3b.
-const MODEL_NAME = process.env.TRUEFORGE_MODEL ?? "ollama/llama3.2:3b";
+const MODEL_NAME = process.env.TRUEFORGE_MODEL ?? "ollama/llama-3-2-3b";
 
 const client = new TrueForge({
   baseUrl: BASE_URL,
@@ -13,9 +14,8 @@ const client = new TrueForge({
 });
 
 async function main() {
-  mkdirSync("docs/spikes", { recursive: true });
-
-  const logPath = "docs/spikes/s1-events.jsonl";
+  const outputDir = mkdtempSync(join(tmpdir(), "forge-stream-")).toString();
+  const logPath = join(outputDir, "s1-events.jsonl");
   writeFileSync(logPath, "");
 
   console.log("Creating inline-agent session...");

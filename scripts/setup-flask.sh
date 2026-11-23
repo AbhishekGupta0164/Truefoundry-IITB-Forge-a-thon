@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
-FLASK_DIR="$PARENT_DIR/../flask"
+FLASK_DIR="${FLASK_DIR:-$PARENT_DIR/../flask-recording}"
 
 echo "=== Setting up Flask testing repository ==="
 if [ ! -d "$FLASK_DIR" ]; then
@@ -15,6 +15,19 @@ if [ ! -d "$FLASK_DIR" ]; then
 fi
 
 cd "$FLASK_DIR"
+REMOTE_URL="$(git remote get-url origin 2>/dev/null || true)"
+if [[ "$REMOTE_URL" != *"pallets/flask"* ]]; then
+    echo "ERROR: $FLASK_DIR is not a pallets/flask checkout (origin: ${REMOTE_URL:-none})."
+    exit 1
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+    echo "ERROR: Refusing to change a dirty Flask checkout: $FLASK_DIR"
+    echo "Use a separate clean recording clone or manually review its changes first."
+    git status --short
+    exit 1
+fi
+
 echo "Checking out commit 22d92470..."
 git checkout 22d92470
 

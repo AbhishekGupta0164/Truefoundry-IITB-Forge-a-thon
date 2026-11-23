@@ -28,6 +28,7 @@ export interface ApplyPatchHunkParams {
   newStart?: number;
   newLines?: number;
   content?: string;
+  task_id?: string;
 }
 
 export interface ApplyPatchHunkResult {
@@ -113,7 +114,7 @@ export async function executeApplyPatchHunk(
   const hunk_id = hunkId;
 
   // 0. Ensure patch/session is not cancelled
-  defaultCancelManager.assertNotCancelled(patchId);
+  cancelManager.assertNotCancelled(patchId);
 
   // 1. Look up patch and hunk
   const match = patchStore.getHunk(patchId, hunkId);
@@ -193,10 +194,12 @@ export async function executeApplyPatchHunk(
 
   hunk.applied = true;
   hunk.approved = true;
+  hunk.status = 'applied';
+  hunk.appliedAt = Date.now();
 
   // Record inverse edit for whole task undo (T6)
   undoManager.recordInverseEdit({
-    taskId: (patch as any).taskId || 'current-task',
+    taskId: params.task_id || (patch as any).taskId || 'current-task',
     patchId: patch_id,
     hunkId: hunk_id,
     file: absPath,

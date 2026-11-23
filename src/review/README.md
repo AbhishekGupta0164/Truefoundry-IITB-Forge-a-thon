@@ -63,17 +63,12 @@ When `apply_patch_hunk` requires manual approval, the TrueForge agent engine pau
 - **SDK Invariant**: Resume turns contain *only* `user.tool_approval` events. Never mix `user.message` and `user.tool_approval` in the same turn stream input.
 - **Cancellation**: `client.sessions.cancel(sessionId)` cancels running turns, clears pending approvals, and emits `turn.done` with `status: "cancelled"`.
 
-## 5. S3 Approval Spike Results
-Documented in `docs/spikes/s3-report.md`:
-- Verified MCP server `127.0.0.1:8765` exposes `apply_patch_hunk`.
-- Tested approval pause with `requireApprovalForTools: ["apply_patch_hunk"]`.
-- Verified programmatic multi-hunk resume: `h1` allowed (applied to fixture), `h2` denied (not applied).
-- Confirmed git diff in `test/fixtures/mini-repo` reflects only `h1`.
-- Verified `sessions.cancel()` immediately aborts execution and abandons pending approvals.
+## 5. Approval Verification Status
+The former S3 spike manufactured approval events and wrote a fixture when TrueForge was offline. That path and its generated report were removed. The SDK request mapping and approval-resume logic are covered by test-only SDK fakes in `test/unit/sdk-event-mapping.test.ts`; they do not establish live daemon behavior. A real TrueForge session and approval pause must be observed in the VS Code Extension Development Host before claiming live verification.
 
 ## 6. Verification & Test Suite
 - `test/unit/stage3-review-engine.test.ts`: 28 unit tests covering all Stage 3 requirements.
-- `test/e2e/stage3-e2e.test.ts`: End-to-end verification covering Tests A through E.
+- `test/e2e/stage3-e2e.test.ts`: local review, accept/reject, stale-change, and Undo checks. It does not call a live model.
 - Run tests:
   ```bash
   npm run typecheck

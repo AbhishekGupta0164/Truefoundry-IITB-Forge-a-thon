@@ -4,7 +4,7 @@
  * Verifies submission readiness:
  * - .vscodeignore excludes non-distribution files
  * - package.json defines correct packaging scripts and metadata
- * - demo/README.md provides reproduction instructions
+ * - docs/criteria-readiness.md distinguishes code tests from live session evidence
  * - .github/workflows/ci.yml defines continuous integration gates
  */
 
@@ -35,17 +35,16 @@ describe('T12 — Package VSIX, CI, README', () => {
     expect(pkg.scripts['vscode:prepublish']).toBe('npm run build');
     expect(pkg.scripts['package']).toBeDefined();
     expect(pkg.scripts['vsce-package']).toBeDefined();
+    expect(pkg.scripts['package']).toContain('@vscode/vsce@4.1.1');
   });
 
-  it('demo/README.md exists and includes instructions for Tasks A, B, and C', () => {
-    const demoPath = path.join(REPO_ROOT, 'demo/README.md');
-    expect(fs.existsSync(demoPath)).toBe(true);
+  it('criteria readiness notes distinguish code tests from live model evidence', () => {
+    const readinessPath = path.join(REPO_ROOT, 'docs/criteria-readiness.md');
+    expect(fs.existsSync(readinessPath)).toBe(true);
 
-    const content = fs.readFileSync(demoPath, 'utf-8');
-    expect(content).toContain('Task A');
-    expect(content).toContain('Task B');
-    expect(content).toContain('Task C');
-    expect(content).toContain('start:all');
+    const content = fs.readFileSync(readinessPath, 'utf-8');
+    expect(content).toContain('Live session pending');
+    expect(content).toContain('No TrueForge daemon is listening');
   });
 
   it('.github/workflows/ci.yml triggers on feat branches and verifies build and package', () => {
@@ -55,6 +54,8 @@ describe('T12 — Package VSIX, CI, README', () => {
     const content = fs.readFileSync(ciPath, 'utf-8');
     expect(content).toContain('feat/*');
     expect(content).toContain('npm run test:unit');
-    expect(content).toContain('vsce package');
+    expect(content).toContain('npm run test:e2e');
+    expect(content).toContain('run: npm ci');
+    expect(content).toContain('npm run package');
   });
 });

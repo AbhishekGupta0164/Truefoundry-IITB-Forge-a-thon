@@ -6,7 +6,7 @@
  * - Test B: Accept hunk 1 and reject hunk 2 (only hunk 1 in git diff)
  * - Test C: Undo Whole Task (git diff returns to pristine)
  * - Test D: Manual edit and stale approval (denied, manual edit untouched)
- * - Test E: Approval pause (S3 spike execution)
+ * - Approval pause and resume contracts are covered by sdk-event-mapping.test.ts.
  */
 
 import * as fs from 'fs';
@@ -19,7 +19,6 @@ import { ForgeStatusBar } from '../../src/ui/status-bar';
 import { WorkspaceManager } from '../../src/mcp/workspace';
 import { ReviewPatch } from '../../src/shared/types';
 import { StaleHunkError } from '../../src/shared/errors';
-import { runS3Spike } from '../../spikes/s3-approval';
 
 describe('Stage 3 End-to-End Verification (Section 13: Tests A - E)', () => {
   const repoRoot = path.resolve(process.cwd());
@@ -197,9 +196,4 @@ describe('Stage 3 End-to-End Verification (Section 13: Tests A - E)', () => {
     expect(currentOnDisk).toBe(userManualContent);
   });
 
-  it('Test E: S3 Approval Pause Spike verifies allow for h1 and deny for h2', async () => {
-    const report = await runS3Spike(true);
-    expect(report.modelSeesDenialResult).toBe(true);
-    expect(report.cancellationResult.turnStatusAfterCancel).toBe('cancelled');
-  });
 });
