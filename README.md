@@ -4,11 +4,12 @@
 The model decides what to read and what to change. The editor decides what reaches the disk.</p>
 
 <p align="center">
-  <a href="#demo">Demo</a> ·
+  <a href="#demo-video">Demo</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#how-context-is-selected">Context</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#the-three-fixed-tasks">Tasks</a> ·
+  <a href="#evidence">Evidence</a> ·
   <a href="#judge-scorecard">Scorecard</a> ·
   <a href="#limitations">Limitations</a>
 </p>
@@ -18,64 +19,53 @@ The model decides what to read and what to change. The editor decides what reach
   <img alt="Node 22.14+" src="https://img.shields.io/badge/node-%E2%89%A522.14-339933?style=flat-square&logo=nodedotjs&logoColor=white" />
   <img alt="VS Code 1.90+" src="https://img.shields.io/badge/VS%20Code-%5E1.90-007acc?style=flat-square&logo=visualstudiocode&logoColor=white" />
   <img alt="TrueForge 0.184.3" src="https://img.shields.io/badge/TrueForge-0.184.3-6366f1?style=flat-square" />
-  <img alt="MCP streamable HTTP" src="https://img.shields.io/badge/MCP-streamable%20HTTP-6b7280?style=flat-square" />
-  <img alt="TypeScript strict" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&logoColor=white" />
 </p>
 
 > [!IMPORTANT]
 > Forge Agent holds no model-provider key and never calls a model provider. All reasoning, sessions, tool orchestration and approvals belong to **TrueForge**, which must be running locally. Provider keys are entered inside TrueForge only.
 
 > [!WARNING]
-> Approved terminal commands run as your local user and are **not** sandboxed. They are limited to an exact allowlist (see [Safety invariants](#safety-invariants)), but review every command and use a disposable clone for untrusted work.
+> Approved terminal commands run as your local user and are **not** sandboxed. They are limited to an exact allowlist (see [Safety invariants](#safety-invariants)). Review every command and use a disposable clone for untrusted work.
 
-This repository is the IIT Bombay Techfest / TrueFoundry **Forge-a-thon** Round 1 submission by team **Three Winners** (Team ID `TM-7164696B5DD`). Target workspace for the three organizer tasks: [pallets/flask](https://github.com/pallets/flask) tag **3.1.3** (`22d92470`), sibling checkout at `../flask`.
+This is the IIT Bombay Techfest / TrueFoundry **Forge-a-thon** Round 1 submission by team **Three Winners** (Team ID `TM-7164696B5DD`). Target workspace: [pallets/flask](https://github.com/pallets/flask) tag **3.1.3** (`22d92470`), sibling checkout at `../flask`.
+
+| Demo video | Write-up PDF | Repository |
+| --- | --- | --- |
+| [youtu.be/uy5ithxDSoI](https://youtu.be/uy5ithxDSoI) (4:00) | [Google Drive folder](https://drive.google.com/drive/folders/1sjT6-KtvXz5Syp3XEFC-v05beu-45A1S?usp=drive_link) | [Truefoundry-IITB-Forge-a-thon](https://github.com/AbhishekGupta0164/Truefoundry-IITB-Forge-a-thon) |
 
 ---
 
 ## Contents
 
-- [Demo](#demo)
-- [Why this exists](#why-this-exists)
+- [Demo video](#demo-video)
 - [What Forge Agent does](#what-forge-agent-does)
 - [Architecture](#architecture)
 - [How context is selected](#how-context-is-selected)
 - [How it uses TrueForge](#how-it-uses-trueforge)
 - [Quick start](#quick-start)
 - [The three fixed tasks](#the-three-fixed-tasks)
-- [Verified state](#verified-state)
+- [Evidence](#evidence)
 - [Settings and commands](#settings-and-commands)
 - [Repository layout](#repository-layout)
-- [Open-source resources](#open-source-resources)
 - [Limitations](#limitations)
 - [Judge scorecard](#judge-scorecard)
 - [Team, tools and licence](#team-tools-and-licence)
 
 ---
 
-## Demo
+## Demo video
 
-A screen recording of all three Forge-a-thon tasks on `pallets/flask` 3.1.3, each followed by its on-screen check: **[watch the demo video](⟦VIDEO_URL⟧)** (⟦m:ss⟧).
+One 4:00 screen recording of all three Forge-a-thon tasks on `pallets/flask` 3.1.3, each followed by its check on screen. Click the thumbnail to watch.
 
-| Time | What you see |
-| --- | --- |
-| ⟦0:00⟧ | **Task A, inline edit.** `Cmd+Alt+K` on `get_debug_flag`, per-hunk Accept / Reject, then `FLASK_DEBUG=off` prints `False`; one undo restores the file |
-| ⟦0:00⟧ | **Task B, agent mode.** One request, no file named. Context map, TrueForge session (turns, tool calls, approval pause), 3 files reviewed hunk by hunk, `pytest tests/test_cli.py -q`, `flask --help`, masked JSON from `flask config` |
-| ⟦0:00⟧ | **Task C, resilience.** Unreachable model: retries with backoff, clear one-sentence message, responsive editor, `git status` shows no files changed |
+[![Forge Agent demo video](https://img.youtube.com/vi/uy5ithxDSoI/maxresdefault.jpg)](https://youtu.be/uy5ithxDSoI)
 
----
-
-## Why this exists
-
-Coding agents fail in organizations for reasons that have little to do with model IQ:
-
-1. **Unbounded writes.** A tool loop that applies a whole file is hard to review and harder to undo.
-2. **Unbounded context.** Concatenating the repo until the window fills is expensive and often wrong.
-3. **Silent failure.** A dead proxy or bad key hangs the editor, dumps a stack trace, or half-writes a tree.
-4. **Key sprawl.** Putting provider secrets inside an extension is a non-starter.
-
-The Forge-a-thon's three fixed tasks encode exactly this on a real, ~17k-line Python tree (Flask 3.1.3): a one-function inline edit, a multi-file CLI feature the agent must *discover*, and a dead-endpoint run that must leave git clean.
-
-Forge Agent is the **editor half** of a coding agent. TrueForge is the **model half**.
+| Time | Chapter | What you see |
+| --- | --- | --- |
+| [0:00–0:03](https://youtu.be/uy5ithxDSoI) | Intro | Forge Agent shows its sources and never writes without you |
+| [0:03–1:34](https://youtu.be/uy5ithxDSoI?t=3) | **Task A, inline edit** | Self-test confirms ports and gateway. `get_debug_flag` selected, one plain-English instruction, a hunk with Accept and Reject ([0:49](https://youtu.be/uy5ithxDSoI?t=49)). After Accept, `FLASK_DEBUG=off` prints `False` ([1:08](https://youtu.be/uy5ithxDSoI?t=68)), `git status` shows one modified file, then undo returns a clean tree ([1:21](https://youtu.be/uy5ithxDSoI?t=81)) |
+| [1:34–2:23](https://youtu.be/uy5ithxDSoI?t=94) | **Task B, agent mode** | One request, no files named. The agent explores the project first ([1:44](https://youtu.be/uy5ithxDSoI?t=104)), then proposes 3 files (`cli.py`, `test_cli.py`, `docs/cli.rst`), each with its own diff ([1:51](https://youtu.be/uy5ithxDSoI?t=111)). Tests pass and `flask config` prints masked JSON ([2:15](https://youtu.be/uy5ithxDSoI?t=135)) |
+| [2:23–2:33](https://youtu.be/uy5ithxDSoI?t=143) | **Localhost (TrueForge session)** | The TrueForge session view for Task B: 1 turn, 1 min 43 s, 25 tool calls |
+| [2:33–4:00](https://youtu.be/uy5ithxDSoI?t=153) | **Task C, resilience** | Primary model broken ([2:40](https://youtu.be/uy5ithxDSoI?t=160)); HTTP 422 reported, fallback takes over ([2:55](https://youtu.be/uy5ithxDSoI?t=175)); editor stays responsive ([3:05](https://youtu.be/uy5ithxDSoI?t=185)); fallback proposes one hunk, `helpers.py` untouched before Accept ([3:23](https://youtu.be/uy5ithxDSoI?t=203)); accepted, `FLASK_DEBUG=off` returns `False` again ([3:39](https://youtu.be/uy5ithxDSoI?t=219)); a run is started and Stop pressed ([3:52](https://youtu.be/uy5ithxDSoI?t=232)) |
 
 ---
 
@@ -84,10 +74,10 @@ Forge Agent is the **editor half** of a coding agent. TrueForge is the **model h
 | Surface | What happens |
 | --- | --- |
 | **Inline edit** (`Cmd+Alt+K` / `Ctrl+Alt+K`) | Selection, file path, line range and instruction go to a TrueForge session. The model calls `propose_edit` over MCP. Hunks appear as CodeLens **Accept / Reject**. Disk is untouched until Accept. |
-| **Agent chat** (Forge Agent icon in the activity bar; drag it to the Secondary Side Bar for a Cursor-style layout) | Type a task and press Run. The prompt goes to TrueForge as typed; **no filenames are added** unless you write `@path/file.py` or `@symbol:name`. The model finds code with `search_text`, `search_symbols`, `find_related` and `read_file`, then proposes edits. Tokens, tool calls, the context map and approvals stream into the view. |
-| **Review** | Native `vscode.diff` (`forge-original:` / `forge-proposed:`), per-hunk CodeLens, stale-hunk denial, `Forge: Undo Whole Task` through recorded inverse edits (not whole-file snapshots). |
-| **Cancel** | `Forge: Cancel Run` calls TrueForge `sessions.cancel`, aborts the local stream, discards unapproved hunks, refuses later applies, and reports if an already-approved hunk was applied. |
-| **Resilience** | Retry with exponential backoff, single-sentence errors, optional automatic fallback to a second configured model, loop guard. |
+| **Agent chat** (Forge Agent icon in the activity bar) | Type a task and press Run. The prompt goes to TrueForge as typed; **no filenames are added** unless you write `@path/file.py` or `@symbol:name`. The model finds code with `search_text`, `search_symbols`, `find_related` and `read_file`, then proposes edits. Tokens, tool calls, the context map and approvals stream into the view. |
+| **Review** | Native `vscode.diff`, per-hunk CodeLens, stale-hunk denial, `Forge: Undo Whole Task` through recorded inverse edits (not whole-file snapshots). |
+| **Cancel** | `Forge: Cancel Run` calls TrueForge `sessions.cancel`, aborts the local stream, discards unapproved hunks and refuses later applies. |
+| **Resilience** | Retry with exponential backoff, single-sentence errors, automatic fallback to a second configured model, loop guard. |
 | **MCP** | Loopback-only `127.0.0.1:8765/mcp`, bearer token in VS Code SecretStorage, workspace path confinement, allowlisted `run_terminal_command`. |
 
 ---
@@ -132,35 +122,6 @@ flowchart LR
   class store,disk,inverse store
 ```
 
-### Request lifecycle (agent mode)
-
-```mermaid
-sequenceDiagram
-  autonumber
-  actor Dev as Developer
-  participant Ext as Extension
-  participant TF as TrueForge
-  participant MCP as MCP server
-  participant WS as Workspace
-
-  Dev->>Ext: Instruction (selection or chat, no filenames)
-  Ext->>TF: Create session (MCP attached) and stream turn
-  loop Until done, budget reached or loop guard
-    TF->>MCP: search_text / search_symbols / find_related / read_file (with reason)
-    MCP-->>TF: Bounded result (budget checked, ledger updated)
-    MCP-->>Ext: Context map entry (path, range, reason)
-  end
-  TF->>MCP: propose_edit
-  MCP-->>Ext: Hunks staged in memory, native diff opens
-  TF-->>Ext: tool.approval_required for apply_patch_hunk
-  Ext->>Dev: Accept / Reject on each hunk
-  Dev->>Ext: Decisions
-  Ext->>TF: user.tool_approval (allow or deny, with reason)
-  TF->>MCP: apply_patch_hunk (allowed hunks only)
-  MCP->>WS: WorkspaceEdit after version recheck, inverse edit recorded
-  TF-->>Ext: Stream done
-```
-
 ### Failure path (Task C)
 
 ```mermaid
@@ -174,7 +135,7 @@ flowchart TD
   again -->|"no"| fb{"Fallback model set<br/>and no tool called yet?"}
   fb -->|"yes"| replay["New session on forge.fallbackModel<br/>replays the request, no user action"]
   fb -->|"no"| fail
-  fail --> clean["Nothing was staged:<br/>git status shows no changes"]
+  fail --> clean["Nothing was staged:<br/>workspace stays clean"]
   replay --> run
 ```
 
@@ -184,8 +145,7 @@ flowchart TD
 2. The server computes the hunks, validates them (Python syntax, new-import resolution, scope), and stages them in `PatchStore`. `git status` stays clean.
 3. The native diff opens with Accept and Reject on every hunk.
 4. Accept: TrueForge's pause on `apply_patch_hunk` resumes with `user.tool_approval`. The hunk is rechecked against the current document version (a hunk whose own lines changed is denied as stale), written through `WorkspaceEdit`, and an inverse edit is recorded.
-5. Optional post-accept Python AST check (`scripts/check_py.py`).
-6. Undo replays the inverse edits in reverse and reports a conflict if you edited the same span afterwards.
+5. Undo replays the inverse edits in reverse and reports a conflict if you edited the same span afterwards.
 
 <details>
 <summary><strong>MCP tool surface</strong></summary>
@@ -219,7 +179,7 @@ Also in `AGENTS.md`.
 
 ## How context is selected
 
-Flask 3.1.3 is about 17,000 lines, larger than most context windows. The agent never receives the repository. It starts with only the request and retrieves what it needs, in this order (documented in `docs/context-strategy.md`):
+Flask 3.1.3 is about 17,000 lines, larger than most context windows. The agent never receives the repository. It starts with only the request and retrieves what it needs, in this order (details in `docs/context-strategy.md`):
 
 1. **Mentions.** `@file` and `@symbol` are resolved by the extension and sent first, inside the same budget.
 2. **Repo map.** A compact outline of modules, classes and functions, under 2,000 tokens.
@@ -233,12 +193,10 @@ Flask 3.1.3 is about 17,000 lines, larger than most context windows. The agent n
 | Files consulted per task | 8 |
 | Search hits per call | 30 |
 | Lines per `read_file` | 200 |
-| Tool output wrap | about 2 KB |
-| Run safety cap | 100k tokens, 30 iterations, 20 tool calls; stop on 3 identical consecutive calls |
 
-The limits live in the MCP server, not in the prompt. A repeated identical read or search costs nothing, which stops weak models from looping. When a limit is reached the tool returns an explicit "context budget reached" result instead of silently adding more code.
+The limits live in the MCP server, not in the prompt. A repeated identical read or search costs nothing, which stops weak models from looping. When a limit is reached the tool returns an explicit "budget exceeded" result instead of silently adding more code.
 
-**Context map.** Every `read_file`, `search_text`, `search_symbols` and `find_related` call is written to a ledger. The agent chat shows it live: path, line range, the reason the model gave, candidates it skipped, and budget used. `@file` and `@symbol` mentions appear as "mentioned by the user".
+**Context map.** Every read and search is written to a ledger that the agent chat shows live: path, line range, the reason the model gave, candidates it skipped, and budget used. It is on screen during Task B at [1:44 in the video](https://youtu.be/uy5ithxDSoI?t=104).
 
 ---
 
@@ -247,16 +205,17 @@ The limits live in the MCP server, not in the prompt. A repeated identical read 
 | TrueForge capability | How Forge Agent uses it | Code |
 | --- | --- | --- |
 | Sessions and streamed turns (TypeScript SDK) | Every agent and inline run: `sessions.create` with an inline agent spec, `sessions.createTurnStream`; events mapped to `token`, `tool_call`, `tool_result`, `approval`, `error`, `done` | `src/trueforge/` |
-| Remote MCP server | The editor's capabilities as tools (table above), attached as `forge-workspace` | `src/mcp/` |
+| Remote MCP server | The editor's capabilities as tools, attached as `forge-workspace` | `src/mcp/` |
 | Tool approval | `requireApprovalForTools: ['apply_patch_hunk', 'run_terminal_command']`. TrueForge pauses the turn with `tool.approval_required`; the hunk is already on screen; Accept or Allow resumes it with `user.tool_approval`; Reject or Deny sends the reason back | `src/trueforge/approvals.ts`, `src/review/` |
-| Deferred tool loading | The MCP server is attached with `preload: false` (same as `agent-definition.json`), so tool definitions load when the agent first needs them | `src/trueforge/client.ts` |
+| Deferred tool loading | The MCP server is attached with `preload: false`, so tool definitions load when the agent first needs them | `src/trueforge/client.ts` |
 | Cancel | `sdk.sessions.cancel` plus a local `AbortSignal` | `src/review/cancel.ts` |
-| Network policy | `NETWORK_POLICY_ENABLED=true`, `OUTBOUND_URL_ALLOWED_HOSTS=["localhost","127.0.0.1"]` | `scripts/start-trueforge.sh` |
 | Model catalog | The model is configured inside TrueForge; the extension only passes `provider/model` names | `forge.model`, `forge.fallbackModel` |
 
-Sandbox and subagents are **off on purpose**: every write already goes through one approval-gated tool, and subagents inherit the same MCP tools (including the writer), so a "read-only" prompt would not be a guard.
+Sandbox and subagents are **off on purpose**: every write already goes through one approval-gated tool, and subagents would inherit the same MCP tools (including the writer), so a "read-only" prompt would not be a guard.
 
-No provider API keys live in this repository. `model.example.json` is a placeholder showing the OpenAI-compatible shape with an empty key.
+No provider API keys live in this repository. `model.example.json` is a placeholder with an empty key.
+
+**Models and cost.** Primary `google-gemini/gemini-3-5-flash`, fallback `google-gemini/gemini-3-1-flash-lite`, temperature 0, called by the local TrueForge daemon. Total cost: **$0** (Gemini free tier, nothing billed). Nothing is deployed.
 
 ---
 
@@ -307,21 +266,17 @@ FLASK_DEBUG=off python -c "from flask.helpers import get_debug_flag; print(get_d
 npx --yes @truefoundry/trueforge@0.184.3 --port 8790
 ```
 
-Open `http://localhost:8790`, go to Settings, Models, and add a provider and key (for example Gemini). Keys are entered here and nowhere else. Use one TrueForge version on every machine: a data folder created by a newer version and opened by an older one fails with `corrupted migrations`. If that happens, move the TrueForge data folder aside and start again.
+Open `http://localhost:8790`, go to Settings, Models, and add a provider and key (for example Gemini). Keys are entered here and nowhere else. Use one TrueForge version on every machine: a data folder created by a newer version and opened by an older one fails with `corrupted migrations`; if that happens, move the TrueForge data folder aside and start again.
 
 Check the model answers tool calls before using the extension: in the TrueForge chat, enable the `forge-workspace` tools and ask it to call `ping`.
 
 ### 4. Launch the extension
 
-One command starts the MCP server, checks TrueForge and runs the self-test:
-
 ```bash
-npm run start:all
+npm run start:all     # starts the MCP server, checks TrueForge, runs the self-test
 ```
 
-Then press **F5** and choose **Run Extension (Flask Workspace)**. That opens `../flask` with `--extensionDevelopmentPath` set to this repo. Open the agent chat from the **Forge Agent** icon in the activity bar.
-
-Set the models in VS Code settings (`provider/model` names exactly as TrueForge lists them):
+Press **F5** and choose **Run Extension (Flask Workspace)**. That opens `../flask` with `--extensionDevelopmentPath` set to this repo. Open the agent chat from the **Forge Agent** icon in the activity bar. Set the models in VS Code settings (`provider/model` names exactly as TrueForge lists them):
 
 ```json
 {
@@ -332,19 +287,11 @@ Set the models in VS Code settings (`provider/model` names exactly as TrueForge 
 
 Before each take, reset Flask: `./scripts/reset-flask.sh` (or `git checkout -- . && git clean -fd` in the Flask clone), and make sure only one extension host is running (a second one will clash on port 8765).
 
-### MCP Inspector (optional)
-
-With the extension running, run `Forge: Copy MCP Connector Settings`, then:
-
-```bash
-npx @modelcontextprotocol/inspector http://127.0.0.1:8765/mcp
-```
-
 ---
 
 ## The three fixed tasks
 
-Use the instruction text exactly as given by the organizers. Reset Flask before each task.
+Use the instruction text exactly as given by the organizers. Reset Flask before each task. Each task is shown in the [demo video](#demo-video).
 
 ### Task A: inline edit
 
@@ -359,7 +306,7 @@ FLASK_DEBUG=off python -c "from flask.helpers import get_debug_flag; print(get_d
 # expect False (stock 3.1.3 prints True); also FLASK_DEBUG=N and FLASK_DEBUG=Off
 ```
 
-Undo once with `Forge: Undo Whole Task`; `git diff` is empty again.
+Undo once; `git diff` is empty again.
 
 ### Task B: agent mode, no filenames
 
@@ -370,7 +317,7 @@ In the agent chat, with no files mentioned, enter:
 Review the hunks and accept, then:
 
 ```bash
-git diff --stat                                   # at least 3 files: src/flask/cli.py, tests/test_cli.py, docs/cli.rst
+git diff --stat                                   # 3 files: src/flask/cli.py, tests/test_cli.py, docs/cli.rst
 pytest tests/test_cli.py -q                       # passes
 flask --help | grep config                        # config is listed
 flask --app examples.tutorial.flaskr:create_app config   # SECRET_KEY shows "***", ordinary keys shown
@@ -380,40 +327,30 @@ The TrueForge session for the run (turns, MCP tool calls, approval pause) is vis
 
 ### Task C: resilience
 
-In TrueForge, point the primary model at an unreachable endpoint (for example a custom provider at `http://127.0.0.1:9/v1`) or use an invalid key, then repeat Task A. Expected: the editor stays responsive, the panel shows the retries and one clear sentence (no stack trace), the fallback model takes over if one is configured and nothing was staged yet, and:
+In TrueForge, point the primary model at an unreachable endpoint (for example a custom provider at `http://127.0.0.1:9/v1`) or use an invalid key, then repeat Task A. Expected: the editor stays responsive, the panel shows one clear sentence (no stack trace), the fallback model takes over if one is configured and nothing was staged yet, and no file changes until you accept:
 
 ```bash
-git status --porcelain      # empty: no files changed before you accept anything
+git status --porcelain      # from a freshly reset Flask: empty before you accept anything
 ```
 
 ---
 
-## Verified state
+## Evidence
 
-Two kinds of evidence exist. They are kept separate.
+Every claim below is tied to something you can watch or rerun. We make no claim beyond what these show; see [Limitations](#limitations) for what is not proven.
 
-### Automated checks
+| # | Claim | Evidence | Where to check |
+| --- | --- | --- | --- |
+| 1 | **Task A works on real Flask and nothing is written before Accept** | Diff with Accept and Reject, then `FLASK_DEBUG=off` prints `False`, `git status` shows one modified file, undo leaves it clean | Video [0:18–1:34](https://youtu.be/uy5ithxDSoI?t=18) |
+| 2 | **Task B finds the right files with none named and the result runs** | Agent edits `cli.py`, `test_cli.py`, `docs/cli.rst`; tests pass; `flask config` masks secrets. In our scripted tool-chain run: 3 files, 55 lines added, `tests/test_cli.py` 58 to 60 passing, `config` listed in `flask --help`, `SECRET_KEY` and `API_TOKEN` printed as `***` | Video [1:34–2:23](https://youtu.be/uy5ithxDSoI?t=94) |
+| 3 | **Context is bounded and explained** | Context map lists each file, line range, reason and budget used against 12,000 tokens; limits are enforced in the MCP server, with tests | Video [1:44](https://youtu.be/uy5ithxDSoI?t=104), `src/context/` |
+| 4 | **A dead model does not break the editor or the workspace** | Primary model fails (HTTP 422), fallback takes over with no click, editor stays responsive, `helpers.py` stays untouched until Accept | Video [2:40–3:23](https://youtu.be/uy5ithxDSoI?t=160) |
+| 5 | **Cancel is safe** | Stop pressed mid-run: unapproved hunks are discarded and later applies refused | Video [3:52–4:00](https://youtu.be/uy5ithxDSoI?t=232), `src/review/cancel.ts` |
+| 6 | **The real TrueForge loop is used** | TrueForge session view for Task B: 1 turn, 1 min 43 s, 25 tool calls, approval pause on `apply_patch_hunk` | Video [2:23–2:33](https://youtu.be/uy5ithxDSoI?t=143) |
+| 7 | **Safety rules hold under attack** | A 33-check tool-chain run on Flask 3.1.3 (a real MCP client calling the real server over HTTP, no model): nothing written before apply; stale hunks, `../`, secret files, `.git`, `sh -c`, `>` and `git apply` rejected; no token gives HTTP 401 | `test/`, `spikes/` |
+| 8 | **Bugs found on real Flask stayed fixed** | 254 unit and integration tests; each of the four bugs found on real Flask has a regression test that fails on the old code (line-number edits, shifting hunks, phantom-import false positives, opaque 422 errors) | `npm run test:unit` |
 
-| Check | Command | Result |
-| --- | --- | --- |
-| Typecheck | `npm run typecheck` | ⟦0 errors⟧ |
-| Lint | `npm run lint` | ⟦0 problems⟧ |
-| Build | `npm run build` | `dist/extension.js` and `dist/webview.js` built |
-| Tests | `npm run test:unit` | ⟦N passed, N skipped⟧ across ⟦N⟧ files (review engine, MCP, budget, retry and cancel, routing, dead-port, stale hunk, terminal allowlist) |
-| Secret scan | `gitleaks detect` | ⟦no leaks found⟧ |
-| MCP tool chain on Flask 3.1.3 | a real MCP client calls the real server over Streamable HTTP with bearer auth; no model, a script issues the calls an agent would make | ⟦33 / 33 checks⟧: Task A returns `False` for `off`, `OFF`, `n`, `N`, `no`, `0`; Task B changes 3 files; nothing is written before apply; stale hunks, `../`, secret files, `.git`, `sh -c`, `>` and `git apply` are rejected; no token gives HTTP 401 |
-
-### Live runs through TrueForge with a model (recorded in the demo video)
-
-Recorded ⟦date⟧ on ⟦macOS⟧, Node ⟦22.x⟧, Python ⟦3.x⟧, model `⟦provider/model⟧` through TrueForge `0.184.3`.
-
-| Task | Verification | Result | Time | Tokens |
-| --- | --- | --- | --- | --- |
-| A | `FLASK_DEBUG=off python -c "..."` | ⟦False⟧ | ⟦s⟧ | ⟦n⟧ |
-| B | `git diff --stat`, `pytest tests/test_cli.py -q`, `flask --help`, `flask config` | ⟦3 files; N passed; config listed; secrets masked⟧ | ⟦s⟧ | ⟦n of 12,000⟧ |
-| C | `git status --porcelain` after retries | ⟦empty; clear message; fallback used or not⟧ | ⟦s⟧ | 0 |
-
-Each run's tool-call timeline and context ledger can be exported with `Forge: Export Run Report` (⟦if implemented⟧).
+**Rerun it yourself:** clone the repo, follow [Quick start](#quick-start), then run the three tasks above. Each ends in a command whose output you can compare with the video.
 
 ---
 
@@ -427,15 +364,7 @@ Each run's tool-call timeline and context ledger can be exported with `Forge: Ex
 | `forge.fallbackModel` | empty | Second `provider/model` for automatic fallback |
 | `forge.temperature` | `0` | Sampling temperature |
 
-Commands: `Forge: Inline Edit` (`Cmd+Alt+K` / `Ctrl+Alt+K` with a selection), `Forge: Open Agent Chat`, `Forge: Cancel Run`, `Forge: Undo Whole Task`, `Forge: Copy MCP Connector Settings`, `Forge: Start All`, `Forge: Self-Test`.
-
-### Eval harness
-
-```bash
-npm run eval
-```
-
-Writes `eval/results/results.json` and `eval/results/evaluation-table.md`. It checks less than the organizers' on-screen checks (see [Limitations](#limitations)); the Tasks A to C commands above are the reference.
+Commands: `Forge: Inline Edit` (`Cmd+Alt+K` / `Ctrl+Alt+K` with a selection), `Forge: Open Agent Chat`, `Forge: Cancel Run`, `Forge: Undo Whole Task`, `Forge: Copy MCP Connector Settings`, `Forge: Start All`, `Forge: Self-Test`. A multi-model eval harness is available with `npm run eval`; it checks less than the organizers' on-screen checks, so treat the Task A to C commands as the reference.
 
 ---
 
@@ -452,7 +381,7 @@ Truefoundry-IITB-Forge-a-thon/     # this repo (open this folder in VS Code)
 │   ├── ui/                        # inline edit, agent chat panel, status bar, webview
 │   ├── verify/                    # post-accept checks
 │   └── shared/                    # types, events, errors, constants, validation
-├── test/                          # unit, mcp, e2e (vitest; CI runs these)
+├── test/                          # unit, mcp, e2e (vitest)
 ├── eval/                          # multi-model harness and results
 ├── docs/                          # architecture, context strategy, review safety, model setup
 ├── spikes/                        # Stage 1 to 5 verification scripts
@@ -462,88 +391,65 @@ Truefoundry-IITB-Forge-a-thon/     # this repo (open this folder in VS Code)
 ├── model.example.json             # example model config, empty key
 ├── AGENTS.md                      # non-negotiable invariants
 └── LICENSE                        # MIT
-
-../flask/                          # sibling checkout pinned at 22d92470 (not part of this repo)
 ```
-
----
-
-## Open-source resources
-
-| Resource | Use |
-| --- | --- |
-| [pallets/flask](https://github.com/pallets/flask) 3.1.3 / `22d92470` | Organizer target (about 17k lines of Python, tests and docs) |
-| [@truefoundry/trueforge](https://www.npmjs.com/package/@truefoundry/trueforge) 0.184.3 | Local agent harness daemon |
-| [@truefoundry/trueforge-sdk](https://www.npmjs.com/package/@truefoundry/trueforge-sdk) 0.184.1 | Sessions, turn streams, cancel |
-| [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) | Streamable HTTP MCP server |
-| `diff`, `zod` | Hunk parsing and tool schemas |
-| Python `ast` (standard library) | Symbol index and syntax / name checks |
-| vitest, esbuild, TypeScript, ESLint, gitleaks | Test, build, lint, secret scan |
-| [Ollama](https://ollama.com) | Optional local models |
 
 ---
 
 ## Limitations
 
-1. **Fallback covers failures before the first tool call.** A model that dies halfway through Task B is reported, not replayed on the fallback, because a replay would repeat half-finished work. Fallback needs `forge.fallbackModel` set to a second model.
+1. **Fallback covers failures before the first tool call.** A model that dies halfway through Task B is reported, not replayed, because a replay would repeat half-finished work.
 2. **Cancel does not revert hunks you already accepted.** It stops the session, discards unapproved hunks and refuses later applies; `Undo Whole Task` reverts accepted ones.
-3. **Python-centric.** The symbol index, syntax check and phantom-import check are Python-only; other languages fall back to text search. The terminal allowlist is shaped around the Flask tasks.
+3. **Python-centric.** The symbol index, syntax check and phantom-import check are Python-only; the terminal allowlist is shaped around the Flask tasks.
 4. **Hard budgets can stop the agent early** on a very large change. We prefer an explicit "budget exceeded" the model can react to over a silently filled window.
-5. **Stale-hunk check is per hunk.** A hunk is denied if its own lines changed; edits elsewhere in the file are kept and the hunk still applies.
-6. **Models.** Tasks were run on Gemini models; small local models (for example a 3B model) are safe with the extension (clean tree, clear error) but often cannot complete Task B.
-7. **The eval harness checks less than the organizers' on-screen checks.** Treat the Task A to C commands as the reference.
-8. **Runs from source.** Load it with F5; there is no packaged VSIX because the TrueForge SDK is kept external in the bundle.
-9. **One workspace per registered MCP connector**, loopback only, on a fixed port.
+5. **Tested on Gemini models only**, on one machine. Small local models are safe with the extension (clean tree, clear error) but often cannot complete Task B.
+6. **The eval harness checks less than the organizers' on-screen checks.**
+7. **Runs from source.** Load it with F5; there is no packaged VSIX because the TrueForge SDK is kept external in the bundle.
+8. **One workspace per registered MCP connector**, loopback only, on a fixed port.
+9. **No real users yet.** Evidence is our own runs on the organizers' fixed tasks.
 
-**With another month:** score Tasks A to C automatically with the organizers' own checks on three model tiers; let the fallback resume mid-run from the applied state; replace the Python index with tree-sitter and add BM25 plus an import graph to retrieval; add a hunk dependency graph (warn when rejecting an import another hunk needs); persist the undo journal across window reloads; make Cancel offer one-click rollback of the cancelled task's accepted hunks; ship a VSIX; and send TrueForge the notes we gathered while building (the approval-resume flow and the loopback default for local MCP servers cost us the most time).
+**With another month:** score Tasks A to C automatically with the organizers' own checks on three model tiers; let the fallback resume mid-run from the applied state; replace the Python index with tree-sitter; make Cancel offer one-click rollback of the cancelled task's accepted hunks; ship a VSIX; and send TrueForge the notes we gathered (the approval-resume flow and the loopback default for local MCP servers cost us the most time).
 
 ---
 
 ## Judge scorecard
 
-Organizer rubric, 100 points. Every claim is limited to what the demo video and the commands above show.
+Organizer rubric, 100 points. Every claim is limited to what the demo video and the commands above show. Timestamps link into the [demo video](https://youtu.be/uy5ithxDSoI).
 
 | ID | Criterion | Pts | What it shows | Video | Evidence in the repo |
 | --- | --- | ---: | --- | --- | --- |
-| A1 | Inline edit | 10 | Selection and instruction open a native diff with per-hunk Accept and Reject; nothing is written before Accept; `FLASK_DEBUG=off` prints `False` | ⟦m:ss⟧ | `src/ui/`, `src/review/`, review tests |
-| A2 | Agent mode | 10 | With no file named, the agent finds and edits `cli.py`, `test_cli.py` and `cli.rst` | ⟦m:ss⟧ | `git diff --stat`, `src/mcp/tools/` |
-| A3 | Streaming and cancel | 10 | Tokens and tool calls stream into the chat; Cancel stops the turn, discards unapproved hunks, and `git status` shows nothing half-applied | ⟦m:ss⟧ | `src/trueforge/`, `src/review/cancel.ts`, cancel tests |
-| B1 | Context assembly | 15 | Budgeted retrieval (12,000 tokens, 8 files, 30 hits, 200 lines); the context map shows each file, range and reason during Task B | ⟦m:ss⟧ | `src/context/`, `docs/context-strategy.md` |
-| B2 | Diff safety | 10 | Per-hunk review before any write, then undo restores the files | ⟦m:ss⟧ | `src/review/`, stale-hunk and undo tests |
-| B3 | Resilience | 10 | Dead endpoint: retries with backoff, one-sentence error, no stack trace, `git status` empty ⟦; fallback model took over, if shown⟧ | ⟦m:ss⟧ | `src/trueforge/retry.ts`, dead-port tests |
-| B4 | TrueForge integration | 10 | SDK sessions, MCP tools, approval pause on `apply_patch_hunk` drives the review, deferred tool loading (`preload: false`), TrueForge session view | ⟦m:ss⟧ | `src/trueforge/`, `agent-definition.json` |
-| C1 | Video | 10 | Tasks A, B and C in order, each verified on screen | n/a | [Demo video](⟦VIDEO_URL⟧) |
-| C2 | Write-up | 15 | Architecture, context strategy, model setup, trade-offs, scorecard and honest limits | n/a | Write-up PDF, `docs/` |
-
-### Design choices
-
-- Disk writes go through review: proposals are staged in memory and written hunk by hunk only after approval.
-- Undo uses recorded inverse edits instead of restoring whole-file snapshots, so unrelated edits you make afterwards survive.
-- Edits are search-and-replace, not line numbers, matched in three tiers (exact, whitespace-normalised, anchored), so weaker models still land their changes; hunks are located by their own content, so a first hunk that adds an import does not break later ones.
-- A phantom-import check flags only new imports that do not resolve, using the project's own virtualenv.
-- Budgets live in the MCP server, not the prompt, so a looping or weak model cannot exhaust the context window.
-- Errors reach the user as one sentence that includes TrueForge's reason, never a stack trace.
+| A1 | Inline edit | 10 | Selection and instruction open a native diff with per-hunk Accept and Reject; nothing is written before Accept; `FLASK_DEBUG=off` prints `False` | [0:18–1:14](https://youtu.be/uy5ithxDSoI?t=18) | `src/ui/`, `src/review/` |
+| A2 | Agent mode | 10 | With no file named, the agent finds and edits `cli.py`, `test_cli.py` and `docs/cli.rst`; pytest passes and `flask config` masks secrets | [1:34–2:23](https://youtu.be/uy5ithxDSoI?t=94) | `git diff --stat`, `src/mcp/tools/` |
+| A3 | Streaming and cancel | 10 | Tokens and tool calls stream into the chat; Cancel stops the run and discards unapproved hunks | [1:44–2:15](https://youtu.be/uy5ithxDSoI?t=104), [3:52–4:00](https://youtu.be/uy5ithxDSoI?t=232) | `src/trueforge/`, `src/review/cancel.ts` |
+| B1 | Context assembly | 15 | Budgeted retrieval (12,000 tokens, 8 files, 30 hits, 200 lines); the context map shows each file, range and reason during Task B | [1:44–1:51](https://youtu.be/uy5ithxDSoI?t=104) | `src/context/`, `docs/context-strategy.md` |
+| B2 | Diff safety | 10 | Per-hunk review before any write, then undo restores the files | [0:49–1:34](https://youtu.be/uy5ithxDSoI?t=49) | `src/review/`, stale-hunk and undo tests |
+| B3 | Resilience | 10 | Primary model fails, fallback takes over with no user action, editor stays responsive, `helpers.py` untouched until Accept | [2:40–3:23](https://youtu.be/uy5ithxDSoI?t=160) | `src/trueforge/retry.ts`, dead-port tests |
+| B4 | TrueForge integration | 10 | SDK sessions, MCP tools, approval pause on `apply_patch_hunk` drives the review, deferred tool loading (`preload: false`), TrueForge session view | [2:23–2:33](https://youtu.be/uy5ithxDSoI?t=143) | `src/trueforge/`, `agent-definition.json` |
+| C1 | Video | 10 | Tasks A, B and C in order, each verified on screen | [0:00–4:00](https://youtu.be/uy5ithxDSoI) | [Demo video](https://youtu.be/uy5ithxDSoI) |
+| C2 | Write-up | 15 | Architecture, context strategy, model setup, trade-offs, scorecard and honest limits | n/a | [Write-up PDF](https://drive.google.com/drive/folders/1sjT6-KtvXz5Syp3XEFC-v05beu-45A1S?usp=drive_link), `docs/` |
 
 ---
 
 ## Team, tools and licence
 
-**Team Three Winners** (Team ID `TM-7164696B5DD`)
+**Team Three Winners** (Team ID `TM-7164696B5DD`), Baderia Global Institute of Engineering and Management, Jabalpur
 
-| Member | GitHub |
-| --- | --- |
-| Abhishek Gupta (lead) | [AbhishekGupta0164](https://github.com/AbhishekGupta0164) |
-| Khushi Rana | [khushi-rana1](https://github.com/khushi-rana1) |
-| Taru Tiwari | [TaruTiwari82](https://github.com/TaruTiwari82) |
+| Member | GitHub | What they mainly built |
+| --- | --- | --- |
+| Abhishek Gupta (Team Lead) | [AbhishekGupta0164](https://github.com/AbhishekGupta0164) | Project setup and integration, deferred tool loading, the one-click launcher, cancel and whole-task undo |
+| Khushi Rana | [khushi-rana1](https://github.com/khushi-rana1) | TrueForge client and the routing of Tasks A and B, the context ledger and the context map |
+| Taru Tiwari | [TaruTiwari82](https://github.com/TaruTiwari82) | MCP server and tools, edit matching, the fault-injection proxy, eval harness and stress tests |
 
 **Starting point:** from scratch. The repository was initialised on 6 November 2026 (first commit `ef7d1df`). No upstream project was forked and no agent loop from Cline, Continue, Roo Code or opencode is used; the loop runs on TrueForge.
 
-**AI coding assistants used to build it** (declared, no points): Google Antigravity with Gemini for most of the build, and Claude Code for debugging and fixes against real Flask. A team member reviewed each change before it was merged.
+**Built with:** [TrueForge](https://www.npmjs.com/package/@truefoundry/trueforge) 0.184.3 and [`@truefoundry/trueforge-sdk`](https://www.npmjs.com/package/@truefoundry/trueforge-sdk) 0.184.1, [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk), the VS Code Extension API, TypeScript, esbuild, zod, `diff`, and Python's `ast` module. Tested with vitest and ESLint against [pallets/flask](https://github.com/pallets/flask) 3.1.3 and pytest 8.4.2.
+
+**AI coding assistants used** (declared, no points): Google Antigravity with Gemini for most of the build, and Claude Code for debugging and fixes against real Flask in the final days, including their tests. A team member reviewed each change before it was merged.
 
 **Licence:** MIT, see [LICENSE](LICENSE).
 
 ---
-
+ 
 <p align="center">
   <sub>Forge-a-thon, Techfest IIT Bombay · on TrueFoundry TrueForge</sub>
 </p>
+
