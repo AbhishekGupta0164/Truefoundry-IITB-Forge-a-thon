@@ -528,7 +528,7 @@ Organizer rubric, 100 points. Every claim is limited to what the demo video and 
 
 ## Team, tools and licence
 
-**Team Three Winners** (Team ID `TM-7164696B5DD`), Global Baderia Institute of Management, Jabalpur:
+**Team Three Winners** (Team ID `TM-7164696B5DD`)
 
 | Member | GitHub |
 | --- | --- |
